@@ -78,6 +78,7 @@
     <Compile Include="DeleteTrack.Designer.cs">
       <DependentUpon>DeleteTrack.cs</DependentUpon>
     </Compile>
+    <Compile Include="iTunesExtensions.cs" />
     <Compile Include="MusicBeeInterface.cs" />
     <Compile Include="NewIPod.cs">
       <SubType>Form</SubType>
