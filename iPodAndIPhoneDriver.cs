@@ -1,16 +1,18 @@
-﻿using System;
-using System.Runtime.InteropServices;
-using System.Drawing;
-using System.Windows.Forms;
+﻿using iTunesLib;
+using MusicBeeDeviceSyncPlugin;
+using System;
 using System.Collections.Generic;
-using System.Globalization;
-using System.Threading;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.ComponentModel;
-using iTunesLib;
-using System.IO;
-
+using System.Threading;
+using System.Windows.Forms;
+using System.Xml.Serialization;
 
 namespace MusicBeePlugin
 {
@@ -20,7 +22,6 @@ namespace MusicBeePlugin
 		private bool uninstalled = false;
 
 		public static MusicBeeApiInterface MbApiInterface;
-		private PluginInfo about = new PluginInfo();
 
 		public static Form MbForm;
 
@@ -50,31 +51,6 @@ namespace MusicBeePlugin
 
 		public static SavedSettingsType SavedSettings;
 
-
-		//Localizable strings
-
-		//Plugin localizable strings
-		private string pluginName;
-		private string description;
-
-		private string commandName;
-		private string commandDescription;
-
-		private string msgOffline;
-		public static string msgFailedToAddTrackToiTunesLibrary;
-		public static string msgNoAppropriateCategoryFoundIniTunesLibrary;
-		public static string msgDeletePlaylist;
-		public static string msgDeleteTrack;
-		public static string msgFromDevice;
-		public static string msgSomeDuplicatedTracksWereSkipped;
-		public static string msgTrackSourceFileNotFound;
-		public static string msgRemovingTrack;
-		public static string msgAddingTrackToPlaylist;
-		public static string msgSyncingITunesWithiPodIPhone;
-		public static string msgSyncingPlayCountsAndRatingsFROMiPod;
-		public static string msgFillingSyncedPlaylists;
-
-		//Displayed text
 		public string getTagRepresentation(string tag)
 		{
 			return replaceMSIds(removeMSIdAtTheEndOfString(removeRoleIds(tag)));
@@ -113,20 +89,18 @@ namespace MusicBeePlugin
 			return value;
 		}
 
-		public void turnOnEventHandler(object sender, EventArgs e)
+		public void ToggleItunesOpenedAndClosed(object sender, EventArgs e)
 		{
 			while (ITunes.IsInitialised == null) ;
 
 			if (ITunes.IsInitialised == false)
 			{
-				Thread initThread = new Thread(ITunes.Initialise);
-				initThread.Start();
+				Backgrounding.RunInBackground(ITunes.Initialise);
 			}
 			else
 			{
-				Close(PluginCloseReason.UserDisabled);
+				Backgrounding.RunInBackground(() => Eject());
 			}
-
 		}
 
 		public PluginInfo Initialise(IntPtr apiInterfacePtr)
@@ -134,67 +108,32 @@ namespace MusicBeePlugin
 			MbApiInterface = new MusicBeeApiInterface();
 			MbApiInterface.Initialise(apiInterfacePtr);
 
-			ITunes.SendNotificationHandler = MbApiInterface.MB_SendNotification;
-
-
-			//Localizable strings
-
-			//Plugin localizable strings
-			pluginName = "iPod & iPhone Driver";
-			description = "Allows to use iPod/iPhone by the means of iTunes";
-
-			commandName = "Turn iPod && iPhone Driver on";
-			commandDescription = "iPod & iPhone Driver: Turn on/off";
-
-			msgOffline = " - [Offline]";
-			msgFailedToAddTrackToiTunesLibrary = "Failed to add track to iTunes library";
-			msgNoAppropriateCategoryFoundIniTunesLibrary = "No appropriate category found in iTunes library";
-			msgDeletePlaylist = "Delete playlist \"";
-			msgDeleteTrack = "Delete track \"";
-			msgFromDevice = "\" from device?";
-			msgSomeDuplicatedTracksWereSkipped = "Some duplicated tracks were skipped.";
-			msgTrackSourceFileNotFound = "Track source file not found!";
-			msgRemovingTrack = "Removing track ";
-			msgAddingTrackToPlaylist = "Adding track to playlist ";
-			msgSyncingITunesWithiPodIPhone = "Syncing iTunes with iPod/iPhone...";
-			msgSyncingPlayCountsAndRatingsFROMiPod = "Syncing play counts and/or ratings from iPod/iPhone...";
-			msgFillingSyncedPlaylists = "Filling synced playlists...";
-
-			//Defaults for controls
-			SavedSettings = new SavedSettingsType();
-
-			//Lets set initial defaults
-			//SavedSettings.menuPlacement = 2;
-
-
 			//Lets try to read defaults for controls from settings file
-			pluginSettingsFileName = Path.Combine(MbApiInterface.Setting_GetPersistentStoragePath(), "mb_iPod&iPhoneDriver.Settings.xml");
+			pluginSettingsFileName = Path.Combine(MbApiInterface.Setting_GetPersistentStoragePath(), Info.AssemblyName.Name + ".Settings.xml");
 
-			Encoding unicode = Encoding.UTF8;
-			FileStream stream = File.Open(pluginSettingsFileName, FileMode.OpenOrCreate, FileAccess.Read, FileShare.None);
-			StreamReader file = new StreamReader(stream, unicode);
-
-			System.Xml.Serialization.XmlSerializer controlsDefaultsSerializer = null;
-			try
+			using (var stream = File.Open(pluginSettingsFileName, FileMode.OpenOrCreate, FileAccess.Read, FileShare.None))
+			using (var file = new StreamReader(stream, Encoding.UTF8))
 			{
-				controlsDefaultsSerializer = new System.Xml.Serialization.XmlSerializer(typeof(SavedSettingsType));
+				XmlSerializer controlsDefaultsSerializer = null;
+				try
+				{
+					controlsDefaultsSerializer = new XmlSerializer(typeof(SavedSettingsType));
+				}
+				catch (Exception e)
+				{
+					Trace.WriteLine(e); 
+					MessageBox.Show("" + e.Message);
+				}
+
+				try
+				{
+					SavedSettings = (SavedSettingsType)controlsDefaultsSerializer.Deserialize(file);
+				}
+				catch
+				{
+					SavedSettings = new SavedSettingsType();
+				};
 			}
-			catch (Exception e)
-			{
-				MessageBox.Show("" + e.Message);
-			}
-
-			try
-			{
-				SavedSettings = (SavedSettingsType)controlsDefaultsSerializer.Deserialize(file);
-			}
-			catch
-			{
-				//Ignore...
-			};
-
-			file.Close();
-
 
 			ReencodedFilesStorage = MbApiInterface.Setting_GetPersistentStoragePath() + "iPod & iPhone Driver";
 			if (!Directory.Exists(ReencodedFilesStorage))
@@ -202,39 +141,10 @@ namespace MusicBeePlugin
 				Directory.CreateDirectory(ReencodedFilesStorage);
 			}
 
-
 			Language = Thread.CurrentThread.CurrentCulture.TwoLetterISOLanguageName;
 
-			if (!File.Exists(Application.StartupPath + @"\Plugins\ru\mb_iPod&iPhoneDriver.resources.dll")) Language = "en"; //For testing
-
-			if (Language == "ru")
-			{
-				//Plugin localizable strings
-				pluginName = "Драйвер iPod & iPhone";
-				description = "Плагин позволяет использовать iPod/iPhone посредством iTunes";
-
-				commandName = "Включить драйвер iPod && iPhone";
-				commandDescription = "Драйвер iPod & iPhone: Включить/выключить";
-
-				msgOffline = " - [Автономно]";
-				msgFailedToAddTrackToiTunesLibrary = "Не удалось добавить композицию в медиатеку iTunes";
-				msgNoAppropriateCategoryFoundIniTunesLibrary = "Не найдено подходящей категории в медиатеке iTunes";
-				msgDeletePlaylist = "Удалить плейлист \"";
-				msgDeleteTrack = "Удалить композицию \"";
-				msgFromDevice = "\" из устройства?";
-				msgSomeDuplicatedTracksWereSkipped = "Некоторые повторяющиеся композиции были пропущены.";
-				msgTrackSourceFileNotFound = "Исходный файл композиции не найден!";
-				msgRemovingTrack = "Удаляется композиция ";
-				msgAddingTrackToPlaylist = "В плейлист добавляется композиция ";
-				msgSyncingITunesWithiPodIPhone = "Синхронизация iTunes с iPod/iPhone...";
-				msgSyncingPlayCountsAndRatingsFROMiPod = "Синхронизация счетчиков воспроизведения и рейтингов из iPod/iPhone...";
-				msgFillingSyncedPlaylists = "Заполнение синхронизированных плейлистов...";
-			}
-			else
-			{
-				Language = "en";
-			}
-
+			if (!File.Exists(Path.Combine(Application.StartupPath, "Plugins", "ru", Info.AssemblyName.Name + ".resources.dll")))
+				Language = "en"; //For testing
 
 			//Lets reset invalid defaults for controls
 			if (SavedSettings.deviceName == null) SavedSettings.deviceName = "";
@@ -249,27 +159,14 @@ namespace MusicBeePlugin
 			//Final initialization
 			MbForm = (Form)Form.FromHandle(MbApiInterface.MB_GetWindowHandle());
 
-			MbApiInterface.MB_AddMenuItem("mnuTools/" + commandName, commandDescription, turnOnEventHandler);
+			MbApiInterface.MB_AddMenuItem(
+				"mnuTools/" + Text.L("Open iPod && iPhone Sync"),
+				Text.L("Turns sync plugin on and off"),
+				ToggleItunesOpenedAndClosed);
 
-			if (File.Exists(Application.StartupPath + @"\Plugins\DevMode.txt"))
-				DeveloperMode = true;
+			DeveloperMode = File.Exists(Application.StartupPath + @"\Plugins\DevMode.txt");
 
-
-			about.PluginInfoVersion = PluginInfoVersion;
-			about.Name = pluginName;
-			about.Description = description;
-			about.Author = "boroda74";
-			about.TargetApplication = "iTunes";   // current only applies to artwork, lyrics or instant messenger name that appears in the provider drop down selector or target Instant Messenger
-			about.Type = PluginType.Storage;
-			about.VersionMajor = (short)System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.Major;  // .net version
-			about.VersionMinor = (short)System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.Minor; // plugin version
-			about.Revision = (short)System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.Build; // number of days since 2000-01-01 at build time
-			about.MinInterfaceVersion = 28;
-			about.MinApiRevision = 32;
-			about.ReceiveNotifications = ReceiveNotificationFlags.StartupOnly;
-			about.ConfigurationPanelHeight = 0;   // height in pixels that musicbee should reserve in a panel for config settings. When set, a handle to an empty panel will be passed to the Configure function
-
-			return about;
+			return Info.Current;
 		}
 
 		public bool Configure(IntPtr panelHandle)
@@ -280,8 +177,7 @@ namespace MusicBeePlugin
 			// keep in mind the panel width is scaled according to the font the user has selected
 			// if about.ConfigurationPanelHeight is set to 0, you can display your own popup window
 
-			SettingsPlugin tagToolsForm = new SettingsPlugin(this, about);
-			tagToolsForm.ShowDialog();
+			new ConfigurationDialog().ShowDialog();
 			SaveSettings();
 
 			return true;
@@ -291,15 +187,11 @@ namespace MusicBeePlugin
 		// its up to you to figure out whether anything has changed and needs updating
 		public void SaveSettings()
 		{
-			Encoding unicode = Encoding.UTF8;
-			FileStream stream = File.Open(pluginSettingsFileName, FileMode.Create, FileAccess.Write, FileShare.None);
-			StreamWriter file = new StreamWriter(stream, unicode);
-
-			System.Xml.Serialization.XmlSerializer controlsDefaultsSerializer = new System.Xml.Serialization.XmlSerializer(typeof(SavedSettingsType));
-
-			controlsDefaultsSerializer.Serialize(file, SavedSettings);
-
-			file.Close();
+			using (var stream = File.Open(pluginSettingsFileName, FileMode.Create, FileAccess.Write, FileShare.None))
+			using (var file = new StreamWriter(stream, Encoding.UTF8))
+			{
+				new XmlSerializer(typeof(SavedSettingsType)).Serialize(file, SavedSettings);
+			}
 		}
 
 		// MusicBee is closing the plugin (plugin is being disabled by user or MusicBee is shutting down)
@@ -311,24 +203,12 @@ namespace MusicBeePlugin
 		// uninstall this plugin - clean up any persisted files
 		public void Uninstall()
 		{
-			//Delete settings file
 			Eject();
 
-			var files = new string[0];
-
-			if (Plugin.MbApiInterface.Library_QueryFiles("domain=Library"))
-				files = Plugin.MbApiInterface.Library_QueryGetAllFiles().Split(Plugin.FilesSeparators, StringSplitOptions.RemoveEmptyEntries);
-
-			if (files.Length != 0)
+			foreach (var file in MusicBeeFile.AllFiles())
 			{
-				foreach (string file in files)
-				{
-					Plugin.MbApiInterface.Library_SetDevicePersistentId(file, Plugin.DeviceIdType.AppleDevice, "");
-					Plugin.MbApiInterface.Library_SetDevicePersistentId(file, Plugin.DeviceIdType.AppleDevice2, "");
-					Plugin.MbApiInterface.Library_CommitTagsToFile(file);
-				}
+				file.ClearPluginTags();
 			}
-
 
 			if (File.Exists(pluginSettingsFileName))
 				File.Delete(pluginSettingsFileName);
@@ -377,110 +257,51 @@ namespace MusicBeePlugin
 			return null;
 		}
 
-		[Flags()]
-		public enum SynchronisationSupportedFormats : uint
-		{
-			None = 0,
-			SyncWavSupported = 0x100,
-			SyncMp3Supported = 0x200,
-			SyncAacSupported = 0x400,
-			SyncWmaSupported = 0x800,
-			SyncOggSupported = 0x1000,
-			SyncOpusSupported = 0x2000,
-			SyncMpcSupported = 0x4000,
-			SyncFlacSupported = 0x8000,
-			SyncAlacSupported = 0x10000,
-			SyncWavPackSupported = 0x20000,
-			SyncTakSupported = 0x40000
-		}
-
-		[Flags()]
-		public enum SynchronisationSettings
-		{
-			None = 0,
-			SyncRemoveMissingFiles = 0x1,
-			SyncRating2Way = 0x2,
-			SyncPlayCount2Way = 0x4,
-			SyncConfirmRemoveFiles = 0x8,
-			SyncPlaylists2Way = 0x10
-		}
-
-		public enum SynchronisationCategory
-		{
-			Music = 0,
-			Audiobook = 1,
-			Podcast = 2,
-			Video = 3,
-			Playlist = 10
-		}
-
-		[StructLayout(LayoutKind.Sequential)]
-		public struct DeviceProperties
-		{
-			private int version;
-			public string DeviceName;
-			// this should be a 64x64 bitmap
-			public Bitmap DeviceIcon64;
-			public string Manufacturer;
-			public string Model;
-			public string FirmwareVersion;
-			public int BatteryLevel;
-			public ulong FreeSpace;
-			public ulong TotalSpace;
-			// if yes, a Music node and if enabled Audiobook, Podcast, Video and playlist nodes are displayed in the Devices tree
-			public bool ShowCategoryNodes;
-			// device supports audio books as a category - if no, the files are synchronised to the music library
-			public bool AudiobooksSupported;
-			// device supports podcasts as a category - if no, the files are synchronised to the music library
-			public bool PodcastsSupported;
-			// device supports video as a category - if no, the files are synchronised to the music library
-			public bool VideoSupported;
-			// device supports a folder structure and allows the user to specify a naming template for the files
-			public bool OrganisedFoldersSupported;
-			// when enabled you need to query the MetaDataType.Artwork tag which will return null, "embeded" or the file location of the artwork. When not enabled, MusicBee forces the artwork to always be embeded (a temporary file is created if the file does not already have embeded artwork)
-			public bool SyncExternalArtwork;
-			// allows the user can choose whether files not on the sync list are to be removed from the device. If not enabled, its up to the plugin what to do
-			public bool SyncAllowFileRemoval;
-			// allows the user to tick 2-way rating sync in the device preferences
-			public bool SyncAllowRating2Way;
-			// allows the user to tick 2-way play count sync in the device preferences
-			public bool SyncAllowPlayCount2Way;
-			public SynchronisationSupportedFormats SupportedFormats;
-			// allows the user to tick 2-way playlist sync in the device preferences
-			public bool SyncAllowPlaylists2Way;
-		}
-
 		public bool GetDeviceProperties(IntPtr handle)
 		{
-			DeviceProperties properties = new DeviceProperties();
-			if (!ITunes.IgnoreIPod)
+			var properties = new DeviceProperties
 			{
-				properties.DeviceName = pluginName;
-				properties.FirmwareVersion = ITunes.IPodSource.SoftwareVersion;
-				properties.FreeSpace = (ulong)ITunes.IPodSource.FreeSpace;
-				properties.TotalSpace = (ulong)ITunes.IPodSource.Capacity;
+				ShowCategoryNodes = true,
+				AudiobooksSupported = false,
+				PodcastsSupported = false,
+				VideoSupported = false,
+				SyncExternalArtwork = false,
+				SyncAllowFileRemoval = true,
+				SyncAllowRating2Way = true,
+				SyncAllowPlayCount2Way = true,
+				SyncAllowPlaylists2Way = false,
+				SupportedFormats =
+					SynchronisationSupportedFormats.SyncMp3Supported |
+					SynchronisationSupportedFormats.SyncAacSupported |
+					SynchronisationSupportedFormats.SyncAlacSupported |
+					SynchronisationSupportedFormats.SyncWavSupported,
+				DeviceIcon64 = (Bitmap)MusicBeeDeviceSyncPlugin.Properties.Resources.ResourceManager.GetObject("iTunes64"),
+			};
+
+			if (ITunes.SyncItunesButNotDevice)
+			{
+				properties.DeviceName = Text.L("iPod & iPhone Sync");
+				properties.FirmwareVersion = "--";
+				properties.Model = Text.L("No device");
+				properties.Manufacturer = Text.L("No device");
 			}
 			else
 			{
-				properties.DeviceName = pluginName;
+				properties.DeviceName = ITunes.IPodSource.Name;
+				properties.FirmwareVersion = ITunes.IPodSource.SoftwareVersion;
+				properties.FreeSpace = (ulong)ITunes.IPodSource.FreeSpace;
+				properties.TotalSpace = (ulong)ITunes.IPodSource.Capacity;
+				properties.Model = Text.L("<undisclosed>");
+				properties.Manufacturer = "Apple Inc.";
 			}
 
-			properties.ShowCategoryNodes = true;
-			properties.AudiobooksSupported = false;
-			properties.PodcastsSupported = false;
-			properties.VideoSupported = false;
-			properties.Manufacturer = "Apple Inc.";
-			properties.SyncExternalArtwork = false;
-			properties.SyncAllowFileRemoval = true;
-			properties.SyncAllowRating2Way = true;
-			properties.SyncAllowPlayCount2Way = true;
-			properties.SyncAllowPlaylists2Way = false;
-
-			System.Resources.ResourceManager resourceManager = new System.Resources.ResourceManager("MusicBeePlugin.Images", System.Reflection.Assembly.GetExecutingAssembly());
-			properties.DeviceIcon64 = (Bitmap)resourceManager.GetObject("iTunes64");
-
-			properties.SupportedFormats = SynchronisationSupportedFormats.SyncMp3Supported | SynchronisationSupportedFormats.SyncAacSupported | SynchronisationSupportedFormats.SyncAlacSupported;
 			Marshal.StructureToPtr(properties, handle, false);
+
+			// Sync play history and ratings from iTunes right now.
+			// Cannot wait for the Synchronize command from MB before collecting ratings and history
+			// because this data may affect the file list passed to Synchronize.
+			//		if (flags.HasFlag(Plugin.SynchronisationSettings.SyncPlayCount2Way) || flags.HasFlag(Plugin.SynchronisationSettings.SyncRating2Way))
+			Backgrounding.RunInBackground(ITunes.SynchronizeRatingsAndPlaysFromItunesToMB);
 
 			return true;
 		}
@@ -495,7 +316,8 @@ namespace MusicBeePlugin
 			}
 			catch (Exception ex)
 			{
-				ITunes.SendNotificationHandler.Invoke(CallbackType.StorageFailed);
+				Trace.WriteLine(ex); 
+				MbApiInterface.MB_SendNotification(CallbackType.StorageFailed);
 				ITunes.lastEx = ex;
 				return false;
 			}
@@ -515,23 +337,25 @@ namespace MusicBeePlugin
 			if (!uninstalled)
 				SaveSettings();
 
+			Trace.Flush();
+
 			return true;
 		}
 
 		public void Refresh()
 		{
-			ITunes.Refresh();
+			// TODO: what to refresh
 		}
 
 		public bool IsReady()
 		{
-			return ITunes.IsInitialised == true ? true : false;
+			return ITunes.IsInitialised == true;
 		}
 
 		public Bitmap GetIcon()
 		{
-			System.Resources.ResourceManager resourceManager = new System.Resources.ResourceManager("MusicBeePlugin.Images", System.Reflection.Assembly.GetExecutingAssembly());
-			return (Bitmap)resourceManager.GetObject("iTunes");
+			return (Bitmap)MusicBeeDeviceSyncPlugin.Properties.Resources.ResourceManager.GetObject("iTunes");
+			//(Bitmap)Info.Resources.GetObject("iTunes");
 		}
 
 		public bool FolderExists(string path)
@@ -566,7 +390,7 @@ namespace MusicBeePlugin
 
 		public KeyValuePair<string, string>[] GetPlaylists()
 		{
-			return ITunes.GetPlaylists();
+			return ITunes.iTunes.GetPlaylists().Select(playlist => new KeyValuePair<string, string>(playlist.Name, playlist.Name)).ToArray();
 		}
 
 		public KeyValuePair<byte, string>[][] GetPlaylistFiles(string id)
@@ -588,14 +412,13 @@ namespace MusicBeePlugin
 	class ITunes
 	{
 		public static bool? IsInitialised = false;
-		public static Plugin.MB_SendNotificationDelegate SendNotificationHandler;
 
-		private static iTunesApp iTunes;
+		public static iTunesApp iTunes;
 		private const int TagCount = 23;
 		private const int AddOperationTimeout = 5; //Timeout of adding track to iTunes (1 means 0.5 sec, 2 - 1.5 sec, 3 - 2.5 sec, 30 - 29.5 sec, etc.)
 		public static Exception lastEx = null;
 
-		public static bool IgnoreIPod = false; //For testing
+		public static bool SyncItunesButNotDevice = false; //For testing
 		public static IITIPodSource IPodSource = null;
 		private static IITUserPlaylist MusicPlaylist = null;
 		private static IITUserPlaylist AudiobooksPlaylist = null;
@@ -644,7 +467,6 @@ namespace MusicBeePlugin
 				iTunes = new iTunesApp();
 				iTunes.BrowserWindow.Minimized = true;
 
-
 				WaitingForIPod waitingWindow = new WaitingForIPod();
 				Plugin.MbForm.AddOwnedForm(waitingWindow);
 
@@ -657,16 +479,18 @@ namespace MusicBeePlugin
 					{
 						if (iTunes.Sources[i].Kind == ITSourceKind.ITSourceKindIPod)
 							IPodSource = (IITIPodSource)iTunes.Sources[i];
+						else
+							Marshal.ReleaseComObject(iTunes.Sources[i]);
 					}
 				}
 
 				if (waitingWindow.proceed == true)
-					IgnoreIPod = true;
+					SyncItunesButNotDevice = true;
 
 				InvokedFunction = waitingWindow.Close;
 				Plugin.MbForm.Invoke(InvokedFunction);
 
-				if (IPodSource == null && !IgnoreIPod)
+				if (IPodSource == null && !SyncItunesButNotDevice)
 				{
 					iTunes.Quit();
 					IsInitialised = false;
@@ -674,35 +498,21 @@ namespace MusicBeePlugin
 					return;
 				}
 
-				//if (Plugin.SavedSettings.deviceName != "" && IPodSource != null && IPodSource.Name != Plugin.SavedSettings.deviceName)
-				//{
-				//    NewIPod newIPodWindow = new NewIPod();
-				//    Plugin.MbForm.AddOwnedForm(newIPodWindow);
-
-				//    InvokedFunction = newIPodWindow.Show;
-				//    Plugin.MbForm.Invoke(InvokedFunction);
-
-				//    while (newIPodWindow.proceed == null) ;
-
-				//    InvokedFunction = newIPodWindow.Close;
-				//    Plugin.MbForm.Invoke(InvokedFunction);
-
-
-				//    if (newIPodWindow.proceed == false)
-				//    {
-				//        IsInitialised = false;
-				//        iTunes.Quit();
-				//        return;
-				//    }
-				//}
-
-
 				if (IPodSource != null)
 				{
 					Plugin.SavedSettings.deviceName = IPodSource.Name;
-					iTunes.UpdateIPod();
-				}
 
+					var originalSize = IPodSource.FreeSpace;
+					IPodSource.UpdateIPod();
+					while (true)
+					{
+						Thread.Sleep(1000);
+						if (Math.Abs(originalSize - IPodSource.FreeSpace) > 1)
+						{
+							break;
+						}
+					}
+				}
 
 				foreach (IITPlaylist playlist in iTunes.LibrarySource.Playlists)
 				{
@@ -719,11 +529,11 @@ namespace MusicBeePlugin
 					}
 				}
 
-
 				IsInitialised = true;
 			}
 			catch (Exception ex)
 			{
+				Trace.WriteLine(ex); 
 				IsInitialised = false;
 				lastEx = ex;
 				MessageBox.Show(ex.Message);
@@ -732,8 +542,9 @@ namespace MusicBeePlugin
 			}
 			finally
 			{
+				Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
 				if (IsInitialised == true)
-					SendNotificationHandler.Invoke(Plugin.CallbackType.StorageReady);
+					Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageReady);
 				//else
 				//    SendNotificationHandler.Invoke(Plugin.CallbackType.StorageFailed);
 			}
@@ -747,18 +558,86 @@ namespace MusicBeePlugin
 
 			if (IsInitialised == true)
 			{
-				if (!IgnoreIPod)
+				if (!SyncItunesButNotDevice)
+				{
 					IPodSource.EjectIPod();
+					Marshal.ReleaseComObject(IPodSource);
+					IPodSource = null;
+				}
 
 				iTunes.Quit();
+				if (MusicPlaylist != null)
+				{
+					Marshal.ReleaseComObject(MusicPlaylist);
+					MusicPlaylist = null;
+				}
+				if (AudiobooksPlaylist != null)
+				{
+					Marshal.ReleaseComObject(AudiobooksPlaylist);
+					AudiobooksPlaylist = null;
+				}
+				if (PodcastsPlaylist != null)
+				{
+					Marshal.ReleaseComObject(PodcastsPlaylist);
+					PodcastsPlaylist = null;
+				}
+				if (VideoPlaylist != null)
+				{
+					Marshal.ReleaseComObject(VideoPlaylist);
+					VideoPlaylist = null;
+				}
+				Marshal.ReleaseComObject(iTunes);
+				iTunes = null;
+
 				IsInitialised = false;
-				ITunes.SendNotificationHandler.Invoke(Plugin.CallbackType.StorageEject);
+				Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageEject);
 			}
 
-			IgnoreIPod = false;
+			SyncItunesButNotDevice = false;
 		}
 
-		public static bool Synchronise(Plugin.SynchronisationSettings flags, KeyValuePair<int, string[]>[] files)
+		private static readonly DateTime MinITunesDateTime = new DateTime(1899, 12, 30);
+
+		public static void SynchronizeRatingsAndPlaysFromItunesToMB()
+		{
+			try
+			{
+				foreach (var track in MusicPlaylist.GetAllTracks())
+				{
+					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and/or ratings from iTunes: {0}", track.Name));
+
+					var file = new MusicBeeFile(track.Location);
+					if (!file.Exists) continue;
+
+					var mbLastPlayed = file.LastPlayed;
+					var itLastPlayed = track.MusicBeeLastPlayed();
+
+					if (mbLastPlayed < itLastPlayed)
+					{
+						//if (flags.HasFlag(Plugin.SynchronisationSettings.SyncPlayCount2Way))
+						{
+							file.PlayCount = track.PlayedCount;
+							file.LastPlayed = itLastPlayed;
+							file.SkipCount = track.SkippedCount;
+						}
+						//if (flags.HasFlag(Plugin.SynchronisationSettings.SyncRating2Way))
+						{
+							file.Rating = track.MusicBeeRating();
+							file.RatingAlbum = track.MusicBeeAlbumRating();
+						}
+						file.CommitChanges();
+					}
+
+					Marshal.ReleaseComObject(track);
+				}
+			}
+			finally
+			{
+				Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
+			}
+		}
+
+		public static bool Synchronise(SynchronisationSettings flags, KeyValuePair<int, string[]>[] files)
 		{
 			// flags has bit indicators whether 2 way rating and/or playcount is requested (only set if enabled in the device properties)
 			// for files():
@@ -780,16 +659,8 @@ namespace MusicBeePlugin
 
 			SynchronizationInProgress = true;
 
-			var playlists = new SortedDictionary<string, IITPlaylist>();
-			var iTunesPlaylists = new SortedDictionary<string, object>();
-			var tracks = new SortedDictionary<string, IITTrack>();
-			var iTunesTracks = new SortedDictionary<string, object>();
-
-			string iTunesIDs;
-			int highPlaylistId;
-			int lowPlaylistId;
-			int highTrackID;
-			int lowTrackID;
+			var playlistKeys = new Dictionary<long, string>();
+			var trackKeys = new Dictionary<long, MusicBeeFile>();
 
 			var someTracksWereSkipped = false;
 
@@ -799,7 +670,6 @@ namespace MusicBeePlugin
 				// ...
 				// if yes, indicate to MusicBee that you want to synch the file - the returned filename is either the same as the supplied filename or if re-encoding/ forced embeding artwork, a temporary filename is returned
 				// if filename is returned as null, that means MusicBee wasnt able to encode the file and it should be skipped from synchronisation
-				string filename = null;
 				bool success = false;
 				string errorMessage = null;
 
@@ -811,136 +681,105 @@ namespace MusicBeePlugin
 					return true;
 				}
 
-
 				try
 				{
-					bool webFile = false;
-					string iTunesTrackFilename = null;
-
 					// sync the file to the category (Key) requested
-					if (item.Key == (int)Plugin.SynchronisationCategory.Playlist) //Playlist. Lets remember synced playlists for later processing
+					if (item.Key == (int)SynchronisationCategory.Playlist) //Playlist. Lets remember synced playlists for later processing
 					{
-						iTunesTrackFilename = Regex.Replace(item.Value[0], "^.*\\\\(.*)(\\..*)", "$1");
-						IITPlaylist libraryPlaylist = iTunes.GetPlaylist(iTunesTrackFilename) ?? iTunes.CreatePlaylist(iTunesTrackFilename);
-
-						object playlistObj = libraryPlaylist;
-						iTunes.GetITObjectPersistentIDs(ref playlistObj, out highPlaylistId, out lowPlaylistId);
-
-						playlists.Add(item.Value[0], libraryPlaylist);
-						iTunesPlaylists.Add(highPlaylistId.ToString() + "@" + lowPlaylistId.ToString(), null);
-
+						var name = Regex.Replace(item.Value[0], "^.*\\\\(.*)(\\..*)", "$1");
+						var playlist = iTunes.GetPlaylist(name) ?? iTunes.CreatePlaylist(name);
+						var key = iTunes.GetPersistentId(playlist);
+						Marshal.ReleaseComObject(playlist);
+						playlistKeys[key] = item.Value[0];
 						success = true;
 						errorMessage = null;
 					}
 					else //Media file
 					{
-						filename = Plugin.MbApiInterface.Sync_FileStart(item.Value[0]);
+						var currentPlaylist = MusicPlaylist;
+						if ((SynchronisationCategory)item.Key == SynchronisationCategory.Audiobook)
+							currentPlaylist = AudiobooksPlaylist;
+						else if ((SynchronisationCategory)item.Key == SynchronisationCategory.Podcast)
+							currentPlaylist = PodcastsPlaylist;
+						else if ((SynchronisationCategory)item.Key == SynchronisationCategory.Video)
+							currentPlaylist = VideoPlaylist;
 
-						bool sync = true;
-
-						if ((Plugin.SynchronisationCategory)item.Key == Plugin.SynchronisationCategory.Audiobook && AudiobooksPlaylist == null)
-							sync = false;
-						else if ((Plugin.SynchronisationCategory)item.Key == Plugin.SynchronisationCategory.Podcast && PodcastsPlaylist == null)
-							sync = false;
-						else if ((Plugin.SynchronisationCategory)item.Key == Plugin.SynchronisationCategory.Video && VideoPlaylist == null)
-							sync = false;
-
-
-						if (sync)
+						if (currentPlaylist == null)
 						{
-							IITTrack libraryTrack = null;
+							errorMessage = Text.L("No appropriate category found in iTunes library");
+						}
+						else
+						{
+							var filename = Plugin.MbApiInterface.Sync_FileStart(item.Value[0]);
 
-							if (!Regex.IsMatch(item.Value[0], "^http\\:.*") && !Regex.IsMatch(item.Value[0], "^https\\:.*")) //Local or local network file. Lets copy tracks to cache
+							try
 							{
-								if (!File.Exists(filename))
-								{
-									throw new IOException(Plugin.msgTrackSourceFileNotFound);
-								}
+								var mbFile = new MusicBeeFile(item.Value[0]);
+								IITTrack libraryTrack = null;
+								string iTunesTrackFilename = null;
 
-								if (item.Value[0] == filename) //Track wasn't converted
+								if (mbFile.WebFile)
+								{
+									iTunesTrackFilename = mbFile.Url;
+								}
+								else if (!File.Exists(filename))
+								{
+									throw new IOException(Text.L("Track source file not found: {0}", filename));
+								}
+								else if (mbFile.Url == filename)
 								{
 									iTunesTrackFilename = filename;
 								}
-								else //Track was converted
+								else
 								{
-									string trackGUID = Plugin.MbApiInterface.Library_GetDevicePersistentId(item.Value[0], Plugin.DeviceIdType.AppleDevice);
+									// Track was converted to a format that iTunes accepts...
+									// Create a unique name for the converted file and store it in the MB file record
+									var trackGUID = mbFile.ReencodingFileName;
 
 									if (string.IsNullOrEmpty(trackGUID))
 									{
 										trackGUID = Guid.NewGuid().ToString();
-
-										Plugin.MbApiInterface.Library_SetDevicePersistentId(item.Value[0], Plugin.DeviceIdType.AppleDevice, trackGUID);
-										Plugin.MbApiInterface.Library_CommitTagsToFile(item.Value[0]);
+										mbFile.ReencodingFileName = trackGUID;
+										mbFile.CommitChanges();
 									}
 
-									iTunesTrackFilename = Plugin.ReencodedFilesStorage + "\\" + trackGUID + item.Value[1];
-
+									iTunesTrackFilename = Path.Combine(Plugin.ReencodedFilesStorage, trackGUID + item.Value[1]);
 									File.Copy(filename, iTunesTrackFilename, true);
 								}
-							}
-							else
-							{
-								iTunesTrackFilename = item.Value[0];
 
-								webFile = true;
-							}
+								var syncKey = mbFile.ITunesKey;
 
-							IITUserPlaylist currentPlaylist = MusicPlaylist;
-							if ((Plugin.SynchronisationCategory)item.Key == Plugin.SynchronisationCategory.Audiobook)
-								currentPlaylist = AudiobooksPlaylist;
-							else if ((Plugin.SynchronisationCategory)item.Key == Plugin.SynchronisationCategory.Podcast)
-								currentPlaylist = PodcastsPlaylist;
-							else if ((Plugin.SynchronisationCategory)item.Key == Plugin.SynchronisationCategory.Video)
-								currentPlaylist = VideoPlaylist;
-
-							iTunesIDs = Plugin.MbApiInterface.Library_GetDevicePersistentId(item.Value[0], Plugin.DeviceIdType.AppleDevice2);
-							highPlaylistId = 0;
-							lowPlaylistId = 0;
-							highTrackID = 0;
-							lowTrackID = 0;
-
-							bool wasTrackAlreadyInITunes = false;
-
-							if (iTunesIDs != "") //Track was synced before
-							{
-								try
+								if (syncKey != 0) //Track was synced before
 								{
-									highPlaylistId = Convert.ToInt32(Regex.Replace(iTunesIDs, "^(.*)@(.*)@(.*)@(.*)", "$1"));
-									lowPlaylistId = Convert.ToInt32(Regex.Replace(iTunesIDs, "^(.*)@(.*)@(.*)@(.*)", "$2"));
-									highTrackID = Convert.ToInt32(Regex.Replace(iTunesIDs, "^(.*)@(.*)@(.*)@(.*)", "$3"));
-									lowTrackID = Convert.ToInt32(Regex.Replace(iTunesIDs, "^(.*)@(.*)@(.*)@(.*)", "$4"));
+									libraryTrack = iTunes.GetTrackByPersistentId(syncKey);
 
-									var playlist = (IITPlaylist)iTunes.LibrarySource.Playlists.get_ItemByPersistentID(highPlaylistId, lowPlaylistId);
-									libraryTrack = (IITTrack)playlist.Tracks.get_ItemByPersistentID(highTrackID, lowTrackID);
-
-									ITTrackKind temp = libraryTrack.Kind; //To generate exception if libraryTrack == null
-
-									//Sync of general tags...
-									if (!webFile) //Local or local network file
-										((IITFileOrCDTrack)libraryTrack).UpdateInfoFromFile();
-
-									wasTrackAlreadyInITunes = true;
-								}
-								catch { }
-							}
-
-
-							if (!wasTrackAlreadyInITunes) //Track was never synced before or was deleted from iTunes library. Lets add track to iTunes library. 
-							{
-								if (!webFile) //Local or local network file
-								{
-									libraryTrack = null;
-
-									currentPlaylist.AddFile(iTunesTrackFilename).Await();
-
-									// Verify the file was added to iTunes
-									DateTime startTime = DateTime.UtcNow;
-									while (libraryTrack == null && (DateTime.UtcNow - startTime).Seconds < AddOperationTimeout)
+									if (libraryTrack == null)
 									{
-										IITTrackCollection foundTracks = currentPlaylist.Search(Plugin.MbApiInterface.Library_GetFileTag(item.Value[0], Plugin.MetaDataType.TrackTitle), ITPlaylistSearchField.ITPlaylistSearchFieldSongNames);
+										Trace.WriteLine("A file in MusicBee appears to have been sync'ed to iTunes before but is not found in iTunes: " + mbFile.Url);
+										syncKey = 0;
+									}
+									else if (!mbFile.WebFile)
+									{
+										//Local or local network file
+										((IITFileOrCDTrack)libraryTrack).UpdateInfoFromFile();
+									}
+								}
 
-										if (foundTracks != null)
+								var addingFile = false;
+
+								if (libraryTrack == null) //Track was never synced before or was deleted from iTunes library. Lets add track to iTunes library. 
+								{
+									if (!mbFile.WebFile) //Local or local network file
+									{
+										currentPlaylist.AddFile(iTunesTrackFilename).Await();
+										addingFile = true;
+
+										// Verify the file was added to iTunes
+										var endTime = DateTime.Now.AddSeconds(AddOperationTimeout);
+										while (libraryTrack == null && DateTime.Now < endTime)
 										{
+											var foundTracks = currentPlaylist.Search(mbFile.Title, ITPlaylistSearchField.ITPlaylistSearchFieldSongNames);
+											if (foundTracks == null) continue;
 											foreach (IITTrack track in foundTracks)
 											{
 												if (track.Kind == ITTrackKind.ITTrackKindFile)
@@ -948,428 +787,159 @@ namespace MusicBeePlugin
 													if (((IITFileOrCDTrack)track).Location == iTunesTrackFilename)
 													{
 														libraryTrack = track;
+														syncKey = iTunes.GetPersistentId(libraryTrack);
+														mbFile.ITunesKey = syncKey;
+														mbFile.CommitChanges();
 														break;
 													}
 												}
 											}
 										}
-									}
 
-									if (libraryTrack == null)
-									{
-										throw new Exception(Plugin.msgFailedToAddTrackToiTunesLibrary);
-									}
-								}
-								else //Web file
-								{
-									libraryTrack = currentPlaylist.AddURL(iTunesTrackFilename);
-								}
-							}
-
-							//Sync of ratings & play counts...
-							int intValue;
-
-							DateTime dateTimeValue;
-							try
-							{
-								dateTimeValue = DateTime.Parse(Plugin.MbApiInterface.Library_GetFileProperty(item.Value[0], Plugin.FilePropertyType.LastPlayed)).ToUniversalTime();
-							}
-							catch
-							{
-								dateTimeValue = DateTime.MinValue;
-							}
-
-							if (dateTimeValue > libraryTrack.PlayedDate.ToUniversalTime())
-							{
-								try
-								{
-									intValue = Convert.ToInt32(Plugin.MbApiInterface.Library_GetFileProperty(item.Value[0], Plugin.FilePropertyType.PlayCount));
-								}
-								catch
-								{
-									intValue = 0;
-								}
-
-								while (true)
-								{
-									try
-									{
-										libraryTrack.PlayedCount = intValue;
-										break;
-									}
-									catch { }
-								}
-
-
-								while (true)
-								{
-									try
-									{
-										libraryTrack.PlayedDate = dateTimeValue;
-										break;
-									}
-									catch { }
-								}
-
-								try
-								{
-									intValue = Convert.ToInt32(Plugin.MbApiInterface.Library_GetFileTag(item.Value[0], Plugin.MetaDataType.Rating));
-								}
-								catch
-								{
-									intValue = 0;
-								}
-
-								while (true)
-								{
-									try
-									{
-										libraryTrack.Rating = intValue;
-										break;
-									}
-									catch { }
-								}
-
-								if (libraryTrack.Kind == ITTrackKind.ITTrackKindFile)
-								{
-									try
-									{
-										intValue = Convert.ToInt32(Plugin.MbApiInterface.Library_GetFileProperty(item.Value[0], Plugin.FilePropertyType.SkipCount));
-									}
-									catch
-									{
-										intValue = 0;
-									}
-
-									while (true)
-									{
-										try
+										if (libraryTrack == null)
 										{
-											((IITFileOrCDTrack)libraryTrack).SkippedCount = intValue;
-											break;
+											throw new Exception(Text.L("Failed to add track to iTunes library"));
 										}
-										catch { }
 									}
-
-									try
+									else //Web file
 									{
-										intValue = Convert.ToInt32(Plugin.MbApiInterface.Library_GetFileTag(item.Value[0], Plugin.MetaDataType.RatingAlbum));
-									}
-									catch
-									{
-										intValue = 0;
-									}
-
-									while (true)
-									{
-										try
-										{
-											((IITFileOrCDTrack)libraryTrack).AlbumRating = intValue;
-											break;
-										}
-										catch { }
+										libraryTrack = currentPlaylist.AddURL(iTunesTrackFilename);
 									}
 								}
-							}
 
-							if (!webFile) //Local or local network file. Lets set last modified time of iTunes track to the same as MB track.
+								// Sync ratings & play counts...
+								var mbLastPlayed = mbFile.LastPlayed.MusicBeeToITunes();
+								if (addingFile || mbLastPlayed > libraryTrack.PlayedDate)
+								{
+									libraryTrack.RepeatTrackOperationUntilNoConflicts(t => t.PlayedDate = mbLastPlayed);
+									libraryTrack.RepeatTrackOperationUntilNoConflicts(t => t.PlayedCount = mbFile.PlayCount);
+									libraryTrack.RepeatTrackOperationUntilNoConflicts(t => t.SetMusicBeeRating(mbFile.Rating));
+									if (libraryTrack.Kind == ITTrackKind.ITTrackKindFile)
+									{
+										libraryTrack.RepeatTrackOperationUntilNoConflicts(t => ((IITFileOrCDTrack)t).SkippedCount = mbFile.SkipCount);
+										libraryTrack.RepeatTrackOperationUntilNoConflicts(t => ((IITFileOrCDTrack)t).SetMusicBeeAlbumRating(mbFile.RatingAlbum));
+									}
+								}
+
+								if (!mbFile.WebFile) //Local or local network file. Lets set last modified time of iTunes track to the same as MB track.
+								{
+									var sourceFileInfo = new FileInfo(mbFile.Url);
+									var destinationFileInfo = new FileInfo(iTunesTrackFilename);
+									destinationFileInfo.LastWriteTimeUtc = sourceFileInfo.LastWriteTimeUtc;
+								}
+
+								Marshal.ReleaseComObject(libraryTrack);
+
+								trackKeys[syncKey] = mbFile;
+
+								success = true;
+								errorMessage = null;
+							}
+							finally
 							{
-								var sourceFileInfo = new FileInfo(item.Value[0]);
-								var destinationFileInfo = new FileInfo(iTunesTrackFilename);
-								destinationFileInfo.LastWriteTimeUtc = sourceFileInfo.LastWriteTimeUtc;
+								// when the file synch is done
+								if (filename != null)
+									Plugin.MbApiInterface.Sync_FileEnd(item.Value[0], success, errorMessage);
 							}
-
-							object playlistObj;
-							object trackObj;
-
-							if (!wasTrackAlreadyInITunes) //Track was never synced before or was deleted from iTunes library. Lets write new IDs to MB library.
-							{
-								playlistObj = libraryTrack.Playlist;
-								iTunes.GetITObjectPersistentIDs(ref playlistObj, out highPlaylistId, out lowPlaylistId);
-								trackObj = libraryTrack;
-								iTunes.GetITObjectPersistentIDs(ref trackObj, out highTrackID, out lowTrackID);
-
-								iTunesIDs = highPlaylistId.ToString() + "@" + lowPlaylistId.ToString() + "@" + highTrackID.ToString() + "@" + lowTrackID.ToString();
-								Plugin.MbApiInterface.Library_SetDevicePersistentId(item.Value[0], Plugin.DeviceIdType.AppleDevice2, iTunesIDs);
-								Plugin.MbApiInterface.Library_CommitTagsToFile(item.Value[0]);
-							}
-
-							playlistObj = libraryTrack.Playlist;
-							iTunes.GetITObjectPersistentIDs(ref playlistObj, out highPlaylistId, out lowPlaylistId);
-							trackObj = libraryTrack;
-							iTunes.GetITObjectPersistentIDs(ref trackObj, out highTrackID, out lowTrackID);
-
-							tracks.Add(item.Value[0], libraryTrack);
-							iTunesTracks.Add(highPlaylistId.ToString() + "@" + lowPlaylistId.ToString() + "@" + highTrackID.ToString() + "@" + lowTrackID.ToString(), null);
-
-							success = true;
-							errorMessage = null;
-						}
-						else
-						{
-							errorMessage = Plugin.msgNoAppropriateCategoryFoundIniTunesLibrary;
 						}
 					}
 				}
-				catch (ArgumentException)
+				catch (ArgumentException ex)
 				{
+					Trace.WriteLine(ex); 
 					success = true;
 					errorMessage = null;
 					someTracksWereSkipped = true;
 				}
 				catch (Exception ex)
 				{
+					Trace.WriteLine(ex); 
 					if (errorMessage == null)
 						errorMessage = ex.Message;
-				}
-				finally
-				{
-					// when the file synch is done
-					if (filename != null)
-						Plugin.MbApiInterface.Sync_FileEnd(item.Value[0], success, errorMessage);
 				}
 			}
 
 			try
 			{
-				//Lets remove tracks and playlists which were not synced if removing missing items is required
-				if ((flags & Plugin.SynchronisationSettings.SyncRemoveMissingFiles) != 0)
+				// Remove non-sync'ed tracks
+				foreach (var track in MusicPlaylist.GetAllTracks())
 				{
-					//Lets remove not synced tracks
-					for (int i = iTunes.LibrarySource.Playlists.Count; i > 0; i--)
+					var key = iTunes.GetPersistentId(track);
+					if (!trackKeys.ContainsKey(key))
 					{
-						IITPlaylist playlist = iTunes.LibrarySource.Playlists[i];
-
-						object playlistObj = playlist;
-						iTunes.GetITObjectPersistentIDs(ref playlistObj, out highPlaylistId, out lowPlaylistId);
-
-						if (
-							 playlist.Kind == ITPlaylistKind.ITPlaylistKindUser
-							 &&
-								  (
-										((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindMusic
-							//|| ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindBooks
-							//|| ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindMovies
-							//|| ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindPodcasts
-							//|| ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindTVShows
-							//|| ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindVideos
-								  )
-							 )
-						{
-							int tracksCount = playlist.Tracks.Count;
-
-							for (int j = playlist.Tracks.Count; j > 0; j--)
-							{
-								int curTrackNumber = tracksCount - j + 1;
-
-								Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Plugin.msgRemovingTrack + curTrackNumber + "/" + tracksCount);
-
-								IITTrack track = playlist.Tracks[j];
-
-								object trackObj = track;
-								iTunes.GetITObjectPersistentIDs(ref trackObj, out highTrackID, out lowTrackID);
-
-								iTunesIDs = highPlaylistId.ToString() + "@" + lowPlaylistId.ToString() + "@" + highTrackID.ToString() + "@" + lowTrackID.ToString();
-
-								object nothing;
-								if (!iTunesTracks.TryGetValue(iTunesIDs, out nothing)) //Track wasn't synced and needs to be deleted.
-								{
-									bool? deleteTrack = true;
-
-									if ((flags & Plugin.SynchronisationSettings.SyncConfirmRemoveFiles) != 0)
-									{
-										string trackRepresentation = GetTrackRepresentation(track);
-										DeleteTrack deleteTrackWindow = new DeleteTrack();
-										deleteTrackWindow.questionLabel.Text = Plugin.msgDeleteTrack + trackRepresentation + Plugin.msgFromDevice;
-										Plugin.MbForm.AddOwnedForm(deleteTrackWindow);
-
-										InvokedFunction = deleteTrackWindow.Show;
-										Plugin.MbForm.Invoke(InvokedFunction);
-
-										while (deleteTrackWindow.deleteTrackOrPlaylist == null) ;
-
-										deleteTrack = deleteTrackWindow.deleteTrackOrPlaylist;
-
-										InvokedFunction = deleteTrackWindow.Close;
-										Plugin.MbForm.Invoke(InvokedFunction);
-									}
-
-									if (deleteTrack == true)
-									{
-										string[] mbFiles = null;
-										Plugin.MbApiInterface.Library_FindDevicePersistentId(Plugin.DeviceIdType.AppleDevice2, new string[] { iTunesIDs }, ref mbFiles);
-
-										foreach (string mbFile in mbFiles)
-										{
-											if (mbFile != null)
-											{
-												try
-												{
-													FileInfo fileInfo = new FileInfo(((IITFileOrCDTrack)track).Location);
-
-													if (fileInfo.Directory.FullName == Plugin.ReencodedFilesStorage)
-														File.Delete(((IITFileOrCDTrack)track).Location);
-												}
-												catch (Exception) { }
-
-												Plugin.MbApiInterface.Library_SetDevicePersistentId(mbFile, Plugin.DeviceIdType.AppleDevice, "");
-												Plugin.MbApiInterface.Library_SetDevicePersistentId(mbFile, Plugin.DeviceIdType.AppleDevice2, "");
-												Plugin.MbApiInterface.Library_CommitTagsToFile(mbFile);
-											}
-										}
-
-										track.Delete();
-									}
-								}
-							}
-						}
-						else if ( //Not smart, user playlist
-							 playlist.Kind == ITPlaylistKind.ITPlaylistKindUser
-							 &&
-							 ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindNone
-							 &&
-							 !((IITUserPlaylist)playlist).Smart
-								  )
-						{
-							iTunesIDs = highPlaylistId.ToString() + "@" + lowPlaylistId.ToString();
-
-							object nothing;
-							if (!iTunesPlaylists.TryGetValue(iTunesIDs, out nothing)) //Track wasn't synced and needs to be deleted.
-							{
-								bool? deletePlaylist = true;
-
-								if ((flags & Plugin.SynchronisationSettings.SyncConfirmRemoveFiles) != 0)
-								{
-									string trackRepresentation = playlist.Name;
-									DeleteTrack deleteTrackWindow = new DeleteTrack();
-									deleteTrackWindow.questionLabel.Text = Plugin.msgDeletePlaylist + trackRepresentation + Plugin.msgFromDevice;
-									Plugin.MbForm.AddOwnedForm(deleteTrackWindow);
-
-									InvokedFunction = deleteTrackWindow.Show;
-									Plugin.MbForm.Invoke(InvokedFunction);
-
-									while (deleteTrackWindow.deleteTrackOrPlaylist == null) ;
-
-									deletePlaylist = deleteTrackWindow.deleteTrackOrPlaylist;
-
-									InvokedFunction = deleteTrackWindow.Close;
-									Plugin.MbForm.Invoke(InvokedFunction);
-								}
-
-								if (deletePlaylist == true)
-								{
-									playlist.Delete();
-								}
-							}
-						}
-					}
-				}
-
-				//Lets fill synced playlists
-				//lastEx = null;
-				foreach (KeyValuePair<string, IITPlaylist> playlistPair in playlists)
-				{
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Plugin.msgFillingSyncedPlaylists);
-
-					foreach (IITTrack track in playlistPair.Value.Tracks)
+						Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Removing track: \"{0}\"", track.Name));
 						track.Delete();
+					}
+					Marshal.ReleaseComObject(track);
+				}
 
-					if (Plugin.MbApiInterface.Playlist_QueryFiles(playlistPair.Key))
+				// Remove non-sync'ed playlists and populate the remaing ones
+				foreach (var playlist in iTunes.GetPlaylists())
+				{
+					var key = iTunes.GetPersistentId(playlist);
+					if (playlistKeys.ContainsKey(key))
 					{
-						int m = 0;
-						string[] playlistFiles = Plugin.MbApiInterface.Playlist_QueryGetAllFiles().Split(Plugin.FilesSeparators, StringSplitOptions.RemoveEmptyEntries);
-						foreach (string playlistFile in playlistFiles)
+						Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Clearing playlist: \"{0}\"", playlist.Name));
+						while (playlist.Tracks.Count > 0)
 						{
-							m++;
-
-							Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Plugin.msgAddingTrackToPlaylist + m + "/" + playlistFiles.Length);
-
-							try
+							var track = playlist.Tracks[1];
+							track.Delete();
+							Marshal.ReleaseComObject(track);
+						}
+						if (Plugin.MbApiInterface.Playlist_QueryFiles(playlistKeys[key]))
+						{
+							var m = 0;
+							var playlistFiles = Plugin.MbApiInterface.Playlist_QueryGetAllFiles().Split(Plugin.FilesSeparators, StringSplitOptions.RemoveEmptyEntries);
+							foreach (var playlistFile in playlistFiles)
 							{
-								((IITUserPlaylist)playlistPair.Value).AddTrack(tracks[playlistFile]);
-							}
-							catch (Exception ex)
-							{
-								//lastEx = ex;
+								m++;
+								Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Adding track {0} of {1} to playlist: \"{2}\"", m, playlistFiles.Length, playlist.Name));
+
+								var track = iTunes.GetTrackByPersistentId(new MusicBeeFile(playlistFile).ITunesKey);
+								try
+								{
+									playlist.AddTrack(track);
+								}
+								catch (Exception ex)
+								{
+									Trace.WriteLine(ex);
+								}
+								Marshal.ReleaseComObject(track);
 							}
 						}
 					}
-
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
+					else
+					{
+						Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Removing playlist: \"{0}\"", playlist.Name));
+						playlist.Delete();
+					}
+					Marshal.ReleaseComObject(playlist);
 				}
 
-				if (!IgnoreIPod)
+				if (!SyncItunesButNotDevice)
 				{
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Plugin.msgSyncingITunesWithiPodIPhone);
+					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing iTunes with iPod/iPhone..."));
 					iTunes.UpdateIPod();
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
-				}
-
-				if ((flags & (Plugin.SynchronisationSettings.SyncPlayCount2Way | Plugin.SynchronisationSettings.SyncRating2Way)) != 0) //Sync play counts and/or ratings FROM iPod
-				{
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Plugin.msgSyncingPlayCountsAndRatingsFROMiPod);
-
-					foreach (KeyValuePair<string, IITTrack> trackPair in tracks)
-					{
-						string mbTrackUrl = trackPair.Key;
-						IITTrack libraryTrack = trackPair.Value;
-
-						DateTime dateTimeValue;
-						try
-						{
-							dateTimeValue = DateTime.Parse(Plugin.MbApiInterface.Library_GetFileProperty(mbTrackUrl, Plugin.FilePropertyType.LastPlayed)).ToUniversalTime();
-						}
-						catch
-						{
-							dateTimeValue = DateTime.MinValue;
-						}
-
-						if ((flags & Plugin.SynchronisationSettings.SyncPlayCount2Way) != 0 && dateTimeValue < libraryTrack.PlayedDate.ToUniversalTime()) //Sync play count and last played date FROM iPod
-						{
-							Plugin.MbApiInterface.Library_SetFileTag(mbTrackUrl, (Plugin.MetaDataType)Plugin.FilePropertyType.PlayCount, libraryTrack.PlayedCount.ToString());
-
-							Plugin.MbApiInterface.Library_SetFileTag(mbTrackUrl, (Plugin.MetaDataType)Plugin.FilePropertyType.LastPlayed, libraryTrack.PlayedDate.ToUniversalTime().ToString());
-
-							if (libraryTrack.Kind == ITTrackKind.ITTrackKindFile)
-								Plugin.MbApiInterface.Library_SetFileTag(mbTrackUrl, (Plugin.MetaDataType)Plugin.FilePropertyType.SkipCount, (((IITFileOrCDTrack)libraryTrack).SkippedCount).ToString());
-						}
-
-						if ((flags & Plugin.SynchronisationSettings.SyncRating2Way) != 0 && dateTimeValue < libraryTrack.PlayedDate.ToUniversalTime()) //Sync rating FROM iPod
-						{
-							Plugin.MbApiInterface.Library_SetFileTag(mbTrackUrl, Plugin.MetaDataType.Rating, libraryTrack.Rating.ToString());
-
-							if (libraryTrack.Kind == ITTrackKind.ITTrackKindFile)
-								Plugin.MbApiInterface.Library_SetFileTag(mbTrackUrl, Plugin.MetaDataType.RatingAlbum, (((IITFileOrCDTrack)libraryTrack).AlbumRating).ToString());
-						}
-
-						Plugin.MbApiInterface.Library_CommitTagsToFile(mbTrackUrl);
-					}
-
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
+					// TODO: Wait for sync to finish?
 				}
 			}
 			catch (Exception ex)
 			{
-				Plugin.MbApiInterface.MB_RefreshPanels();
-
-				SynchronizationInProgress = false;
-
+				Trace.WriteLine(ex);
 				lastEx = ex;
 				return false;
 			}
-
-			Plugin.MbApiInterface.MB_RefreshPanels();
+			finally
+			{
+				Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
+				Plugin.MbApiInterface.MB_RefreshPanels();
+				SynchronizationInProgress = false;
+			}
 
 			if (someTracksWereSkipped)
-				MessageBox.Show(Plugin.msgSomeDuplicatedTracksWereSkipped);
-
-			SynchronizationInProgress = false;
+				MessageBox.Show(Text.L("Some duplicated tracks were skipped."));
 
 			return lastEx == null;
-		}
-
-		public static void Refresh()
-		{
 		}
 
 		public static bool FolderExists(string path)
@@ -1465,7 +1035,8 @@ namespace MusicBeePlugin
 			int[] ids = null;
 			IITTrack foundTrack = null;
 			if (ITTracksCache.TryGetValue(url, out ids))
-				foundTrack = iTunes.LibraryPlaylist.Tracks.get_ItemByPersistentID(url[0], url[1]);
+				//foundTrack = iTunes.LibraryPlaylist.Tracks.get_ItemByPersistentID(url[0], url[1]);
+				foundTrack = iTunes.GetTrackByPersistentId(((long)url[0] << 32) | url[1]);
 
 			return foundTrack != null;
 		}
@@ -1556,114 +1127,45 @@ namespace MusicBeePlugin
 			}
 			catch (Exception ex)
 			{
+				Trace.WriteLine(ex); 
 				lastEx = ex;
 			}
 
 			return null;
 		}
 
-		public static KeyValuePair<string, string>[] GetPlaylists()
-		{
-			List<KeyValuePair<string, string>> playlistsList = new List<KeyValuePair<string, string>>();
-
-			foreach (IITPlaylist playlist in iTunes.LibrarySource.Playlists)
-			{
-				if ( //Not smart, user playlist
-					 playlist.Kind == ITPlaylistKind.ITPlaylistKindUser
-					 &&
-					 ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindNone
-					 &&
-					 !((IITUserPlaylist)playlist).Smart
-					)
-				{
-					playlistsList.Add(new KeyValuePair<string, string>(playlist.Name, playlist.Name));
-				}
-			}
-
-			return playlistsList.ToArray();
-		}
-
 		public static KeyValuePair<byte, string>[][] GetPlaylistFiles(string id)
 		{
 			List<KeyValuePair<byte, string>[]> playlistFiles = new List<KeyValuePair<byte, string>[]>();
 
-			IITPlaylist libraryPlaylist = null;
-			foreach (IITPlaylist playlist in iTunes.LibrarySource.Playlists)
-			{
-				if ( //Not smart, user playlist with given name/id
-					 playlist.Kind == ITPlaylistKind.ITPlaylistKindUser
-					 &&
-					 ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindNone
-					 &&
-					 !((IITUserPlaylist)playlist).Smart
-					 &&
-					 playlist.Name == id
-					)
-				{
-					libraryPlaylist = playlist;
-
-					ITTracksCache.Clear();
-
-					foreach (IITTrack currTrack in libraryPlaylist.Tracks)
-					{
-						if (currTrack.Kind == ITTrackKind.ITTrackKindFile)
-						{
-							KeyValuePair<byte, string>[] file = new KeyValuePair<byte, string>[TagCount];
-
-							IITFileOrCDTrack fileTrack = (IITFileOrCDTrack)currTrack;
-
-							object fileTrackObject = fileTrack;
-							int highID, lowID;
-							iTunes.GetITObjectPersistentIDs(ref fileTrackObject, out highID, out lowID);
-
-							ITTracksCache.Add(fileTrack.Location, new int[] { highID, lowID });
-
-
-							file[0] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Url, fileTrack.Location);
-							file[1] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Artist, fileTrack.Artist);
-							file[2] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.TrackTitle, fileTrack.Name);
-							file[3] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Album, fileTrack.Album);
-							file[4] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Genre, fileTrack.Genre);
-							file[5] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Comment, fileTrack.Comment);
-							file[6] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.AlbumArtistRaw, fileTrack.AlbumArtist);
-							file[7] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.RatingAlbum, fileTrack.AlbumRating.ToString());
-							file[8] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Rating, fileTrack.Rating.ToString());
-							file[9] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Year, fileTrack.Year.ToString());
-							file[10] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Bitrate, fileTrack.BitRate.ToString());
-							file[11] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Size, fileTrack.Size.ToString());
-							file[12] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Duration, (fileTrack.Duration * 1000).ToString());
-							file[13] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.PlayCount, fileTrack.PlayedCount.ToString());
-							file[14] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.SkipCount, fileTrack.SkippedCount.ToString());
-
-							file[15] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Composer, fileTrack.Composer);
-							file[16] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.DiscCount, fileTrack.DiscCount.ToString());
-							file[17] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.DiscNo, fileTrack.DiscNumber.ToString());
-							file[18] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Grouping, fileTrack.Grouping);
-							file[19] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.TrackCount, fileTrack.TrackCount.ToString());
-							file[20] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.TrackNo, fileTrack.TrackNumber.ToString());
-
-							file[21] = new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Artwork, fileTrack.Artwork.Count == 0 ? "" : "Y");
-
-							file[22] = new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.LastPlayed, fileTrack.PlayedDate.ToUniversalTime().ToString());
-
-							playlistFiles.Add(file);
-						}
-					}
-
-					break;
-				}
-			}
-
+			var libraryPlaylist = iTunes.GetPlaylist(id);
 			if (libraryPlaylist == null)
 			{
 				KeyValuePair<byte, string>[] file = new KeyValuePair<byte, string>[TagCount];
 				playlistFiles.Add(file);
 				return playlistFiles.ToArray();
 			}
-			else
+
+			ITTracksCache.Clear();
+
+			foreach (IITTrack currTrack in libraryPlaylist.Tracks)
 			{
-				return playlistFiles.ToArray();
+				if (currTrack.Kind == ITTrackKind.ITTrackKindFile)
+				{
+					IITFileOrCDTrack fileTrack = (IITFileOrCDTrack)currTrack;
+
+					object fileTrackObject = fileTrack;
+					int highID, lowID;
+					iTunes.GetITObjectPersistentIDs(ref fileTrackObject, out highID, out lowID);
+					int a, b, c, d;
+					fileTrack.GetITObjectIDs(out a, out b, out c, out d);
+					ITTracksCache.Add(fileTrack.Location, new int[] { highID, lowID });
+
+					playlistFiles.Add(fileTrack.ToMusicBeeFileProperties());
+				}
 			}
+
+			return playlistFiles.ToArray();
 		}
 
 		public static string CreatePlaylist(string name)

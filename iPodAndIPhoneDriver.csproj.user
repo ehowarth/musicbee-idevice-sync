@@ -9,9 +9,12 @@
     <ErrorReportUrlHistory />
     <FallbackCulture>ru-RU</FallbackCulture>
     <VerifyUploadedFiles>false</VerifyUploadedFiles>
+    <ProjectView>ShowAllFiles</ProjectView>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|AnyCPU'">
-    <StartWorkingDirectory>C:\Users\Саша\Desktop\Архив\Плейеры\MusicBee - test\plugins\</StartWorkingDirectory>
+    <StartWorkingDirectory>C:\Program Files %28x86%29\MusicBee\Plugins</StartWorkingDirectory>
+    <StartArguments>
+    </StartArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|AnyCPU'">
     <StartWorkingDirectory>C:\Users\Саша\Desktop\Архив\Плейеры\MusicBee\Plugins\</StartWorkingDirectory>
