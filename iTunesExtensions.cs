@@ -24,38 +24,52 @@ namespace MusicBeeDeviceSyncPlugin
 		{
 			var library = iTunes.LibrarySource;
 			var playlists = library.Playlists;
-			for (var i = playlists.Count; i > 0; --i)
+			try
 			{
-				var playlist = playlists[i];
-				if (
-					 playlist.Kind == ITPlaylistKind.ITPlaylistKindUser
-					 && ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindNone
-					 && !((IITUserPlaylist)playlist).Smart
-					 )
+				for (var i = playlists.Count; i > 0; --i)
 				{
-					yield return (IITUserPlaylist)playlist;
-				}
-				else
-				{
-					Marshal.ReleaseComObject(playlist);
+					var playlist = playlists[i];
+					if (
+						 playlist.Kind == ITPlaylistKind.ITPlaylistKindUser
+						 && ((IITUserPlaylist)playlist).SpecialKind == ITUserPlaylistSpecialKind.ITUserPlaylistSpecialKindNone
+						 && !((IITUserPlaylist)playlist).Smart
+						 )
+					{
+						yield return (IITUserPlaylist)playlist;
+					}
+					else
+					{
+						Marshal.ReleaseComObject(playlist);
+					}
 				}
 			}
-			Marshal.ReleaseComObject(playlists);
-			Marshal.ReleaseComObject(library);
+			finally
+			{
+				Marshal.ReleaseComObject(playlists);
+				Marshal.ReleaseComObject(library);
+			}
 		}
 
-		public static IEnumerable<IITFileOrCDTrack> GetAllTracks(this IITUserPlaylist playlist)
+		public static IEnumerable<IITFileOrCDTrack> GetAllTracks(this iTunesApp iTunes)
 		{
-			var tracks = playlist.Tracks;
-			for (var i = tracks.Count; i > 0; --i)
+			var library = iTunes.LibraryPlaylist;
+			var tracks = library.Tracks;
+			try
 			{
-				var track = tracks[i];
-				if (track.Kind == ITTrackKind.ITTrackKindFile)
-					yield return (IITFileOrCDTrack)track;
-				else
-					Marshal.ReleaseComObject(track);
+				for (var i = tracks.Count; i > 0; --i)
+				{
+					var track = tracks[i];
+					if (track.Kind == ITTrackKind.ITTrackKindFile)
+						yield return (IITFileOrCDTrack)track;
+					else
+						Marshal.ReleaseComObject(track);
+				}
 			}
-			Marshal.ReleaseComObject(tracks);
+			finally
+			{
+				Marshal.ReleaseComObject(tracks);
+				Marshal.ReleaseComObject(library);
+			}
 		}
 
 		public static long GetPersistentId(this iTunesApp iTunes, IITObject item)
@@ -95,7 +109,13 @@ namespace MusicBeeDeviceSyncPlugin
 
 		private static long Encode(int high, int low)
 		{
-			return (long)(((ulong)high << 32) | (uint)low);
+			var uHigh = (ulong)high;
+			var uLow = (uint)low;
+			var combination = (uHigh << 32) | uLow;
+			var result = (long)combination;
+			Debug.Assert(result.Hi() == high);
+			Debug.Assert(result.Lo() == low);
+			return result;
 		}
 
 		private static int Hi(this long encoded)
@@ -193,12 +213,13 @@ namespace MusicBeeDeviceSyncPlugin
 			}
 		}
 
-		public static void Await(this IITOperationStatus operation)
+		public static IITOperationStatus Await(this IITOperationStatus operation)
 		{
 			while (operation.InProgress)
 			{
 				Thread.Sleep(100);
 			}
+			return operation;
 		}
 	}
 }
