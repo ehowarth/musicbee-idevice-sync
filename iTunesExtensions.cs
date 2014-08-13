@@ -161,7 +161,7 @@ namespace MusicBeeDeviceSyncPlugin
 		public static DateTime? MusicBeeLastPlayed(this IITTrack track)
 		{
 			if (track.PlayedDate <= MinPlayedDate) return null;
-			return track.PlayedDate.AddSeconds(-track.PlayedDate.Second);//.ToUniversalTime();
+			return track.PlayedDate.AddSeconds(-track.PlayedDate.Second).ToUniversalTime();
 		}
 
 		private static readonly DateTime MinPlayedDate = new DateTime(1899, 12, 30);
