@@ -16,7 +16,7 @@ namespace MusicBeeDeviceSyncPlugin
 			format = FakeText(format);
 			Trace.WriteLineIf(
 				!Translations.ContainsKey(developerText),
-				"Missing translation entry for: \"" + developerText + "\'"
+				"Missing translation entry for: \"" + developerText + "\""
 				);
 #else
 			if (LanguageIndex >= 0)
