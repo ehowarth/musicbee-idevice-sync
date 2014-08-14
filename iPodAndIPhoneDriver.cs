@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -18,10 +19,28 @@ namespace MusicBeePlugin
 	{
 		private const int TagCount = 23;
 		public static readonly char[] FilesSeparators = { '\0' };
+		public static readonly Assembly Assembly = Assembly.GetExecutingAssembly();
+		public static readonly AssemblyName AssemblyName = Assembly.GetName();
+
+		public static readonly PluginInfo Info = new PluginInfo
+		{
+			PluginInfoVersion = Plugin.PluginInfoVersion,
+			Name = Text.L("iPod & iPhone Sync"),
+			Description = Text.L("Takes control of the iTunes application to synchronize an iPod, iPhone, or iPad"),
+			Author = "boroda74",
+			TargetApplication = "iTunes",   // current only applies to artwork, lyrics or instant messenger name that appears in the provider drop down selector or target Instant Messenger
+			Type = Plugin.PluginType.Storage,
+			VersionMajor = (short)AssemblyName.Version.Major,  // .net version
+			VersionMinor = (short)AssemblyName.Version.Minor, // plugin version
+			Revision = (short)AssemblyName.Version.Build, // number of days since 2000-01-01 at build time
+			MinInterfaceVersion = 28,
+			MinApiRevision = 32,
+			ReceiveNotifications = Plugin.ReceiveNotificationFlags.StartupOnly,
+			ConfigurationPanelHeight = 0,   // height in pixels that musicbee should reserve in a panel for config settings. When set, a handle to an empty panel will be passed to the Configure function
+		};
 
 		public static MusicBeeApiInterface MbApiInterface;
 
-		private bool DeveloperMode = false;
 		private bool uninstalled = false;
 
 		private Form MbForm;
@@ -41,6 +60,12 @@ namespace MusicBeePlugin
 
 		private readonly Dictionary<string, long> SelectedPlaylistLocationsToPersistentIds = new Dictionary<string, long>();
 
+		/// <summary>
+		/// Called by MusicBee whenever it is loading the plugin whether at startup or when enabling the plugin.
+		/// The pointer parameter should be copied to a <c>MusicBeeApiInterface</c> structure.
+		/// </summary>
+		/// <param name="apiInterfacePtr">Pointer to a <c>MusicBeeApiInterface</c> object</param>
+		/// <returns></returns>
 		public PluginInfo Initialise(IntPtr apiInterfacePtr)
 		{
 			MbApiInterface = new MusicBeeApiInterface();
@@ -52,7 +77,6 @@ namespace MusicBeePlugin
 				Directory.CreateDirectory(ReencodedFilesStorage);
 			}
 
-			//Final initialization
 			MbForm = (Form)Form.FromHandle(MbApiInterface.MB_GetWindowHandle());
 
 			OpenMenu = MbApiInterface.MB_AddMenuItem(
@@ -60,9 +84,7 @@ namespace MusicBeePlugin
 				Text.L("Turns sync plugin on and off"),
 				ToggleItunesOpenedAndClosed);
 
-			DeveloperMode = File.Exists(Application.StartupPath + @"\Plugins\DevMode.txt");
-
-			return Info.Current;
+			return Info;
 		}
 
 		private void ToggleItunesOpenedAndClosed(object sender, EventArgs e)
@@ -73,10 +95,6 @@ namespace MusicBeePlugin
 			{
 				Backgrounding.RunInBackground(StartITunes);
 			}
-			//else
-			//{
-			//	Backgrounding.RunInBackground(() => Eject());
-			//}
 
 			OpenMenu.Enabled = false;
 		}
@@ -91,7 +109,7 @@ namespace MusicBeePlugin
 			var choice = MessageBox.Show(
 				MbForm,
 				Text.L("Clear All Sync Data?"),
-				Info.Current.Name + ' ' + Info.AssemblyName.Version,
+				Info.Name + ' ' + AssemblyName.Version,
 				MessageBoxButtons.YesNo
 				);
 
@@ -161,7 +179,11 @@ namespace MusicBeePlugin
 			}
 		}
 
-		// 
+		/// <summary>
+		/// Called by MusicBee in response to <c>MB_SendNotification(Plugin.CallbackType.StorageReady)</c>
+		/// </summary>
+		/// <param name="handle">Pointer to buffer in which to copy a <c>DeviceProperties</c> object</param>
+		/// <returns></returns>
 		public bool GetDeviceProperties(IntPtr handle)
 		{
 			var properties = new DeviceProperties
@@ -171,9 +193,9 @@ namespace MusicBeePlugin
 				PodcastsSupported = false,
 				VideoSupported = false,
 				SyncExternalArtwork = false,
-				SyncAllowFileRemoval = true,
-				SyncAllowRating2Way = true,
-				SyncAllowPlayCount2Way = true,
+				SyncAllowFileRemoval = false, // This plugin always removes non-sync-ed files from iTunes. It doesn't ask for permission.
+				SyncAllowRating2Way = false, // This plugin always syncs playss from iTunes. It doesn't ask for permission.
+				SyncAllowPlayCount2Way = false, // This plugin always syncs playss from iTunes. It doesn't ask for permission.
 				SyncAllowPlaylists2Way = false,
 				SupportedFormats =
 					SynchronisationSupportedFormats.SyncMp3Supported |
@@ -186,7 +208,7 @@ namespace MusicBeePlugin
 			if (IPodSource == null)
 			{
 				properties.DeviceName = Text.L("iPod & iPhone Sync");
-				properties.FirmwareVersion = "--";
+				properties.FirmwareVersion = Text.L("No device");
 				properties.Model = Text.L("No device");
 				properties.Manufacturer = Text.L("No device");
 			}
@@ -205,24 +227,23 @@ namespace MusicBeePlugin
 			return true;
 		}
 
-		public bool Synchronise(SynchronisationSettings flags, KeyValuePair<int, string[]>[] files)
+		// flags has bit indicators whether 2 way rating and/or playcount is requested (only set if enabled in the device properties)
+		// for files():
+		//   Key - the SynchronisationCategory the file should be sychronised to if appropriate for the device
+		//   Value is 3 strings
+		//   (0) - source file or playlist to be synchronised - use to query MusicBee for file tags, or files in a playlist
+		//   (1) - the filename extension of the file to be synchronised - normally the same as the extension for (0) but if the file would need to be re-encoded to meet the user's synch preferences then the extension for the encoded file
+		//   (2) - if SyncOrganisedFolders is enabled, filename as formatted by a naming template otherwise null
+		// for each file that is synchronised, call Sync_FileStart(filename(0))
+		//   MusicBee will determine if the file needs to be re-encoded depending on the user synch settings and if so the returned filename will be the temporary encoded filename
+		//   call Sync_FileEnd(filename(0), success, errorMessage) when that file has been synched or not
+		// return true if all files synchronised ok
+		public bool Synchronise(SynchronisationSettings flags, KeyValuePair<int, string[]>[] syncItems)
 		{
 			while (ReadyForSync == null) ; // Wait if still opening iTunes
 
 			try
 			{
-				// flags has bit indicators whether 2 way rating and/or playcount is requested (only set if enabled in the device properties)
-				// for files():
-				//   Key - the SynchronisationCategory the file should be sychronised to if appropriate for the device
-				//   Value is 3 strings
-				//   (0) - source file or playlist to be synchronised - use to query MusicBee for file tags, or files in a playlist
-				//   (1) - the filename extension of the file to be synchronised - normally the same as the extension for (0) but if the file would need to be re-encoded to meet the user's synch preferences then the extension for the encoded file
-				//   (2) - if SyncOrganisedFolders is enabled, filename as formatted by a naming template otherwise null
-				// for each file that is synchronised, call Sync_FileStart(filename(0))
-				//   MusicBee will determine if the file needs to be re-encoded depending on the user synch settings and if so the returned filename will be the temporary encoded filename
-				//   call Sync_FileEnd(filename(0), success, errorMessage) when that file has been synched or not
-				// return true if all files synchronised ok
-
 				if (SynchronizationInProgress)
 				{
 					lastEx = null;
@@ -234,17 +255,10 @@ namespace MusicBeePlugin
 				var playlistKeys = new Dictionary<long, string>();
 				var trackKeys = new Dictionary<long, MusicBeeFile>();
 
-				var someTracksWereSkipped = false;
+				//var someTracksWereSkipped = false;
 
-				foreach (KeyValuePair<int, string[]> item in files)
+				foreach (var item in syncItems)
 				{
-					// determine if the the file needs to be synched
-					// ...
-					// if yes, indicate to MusicBee that you want to synch the file - the returned filename is either the same as the supplied filename or if re-encoding/ forced embeding artwork, a temporary filename is returned
-					// if filename is returned as null, that means MusicBee wasnt able to encode the file and it should be skipped from synchronisation
-					bool success = false;
-					string errorMessage = null;
-
 					if (AbortSynchronization)
 					{
 						SynchronizationInProgress = false;
@@ -253,143 +267,134 @@ namespace MusicBeePlugin
 						return true;
 					}
 
-					try
+					if (item.Key == (int)SynchronisationCategory.Playlist)
 					{
-						if (item.Key == (int)SynchronisationCategory.Playlist)
+						// Create or verify playlist. Populate after all files have been processed.
+						var name = Regex.Replace(item.Value[0], "^.*\\\\(.*)(\\..*)", "$1");
+						var playlist = iTunes.GetPlaylist(name) ?? iTunes.CreatePlaylist(name);
+						var key = iTunes.GetPersistentId(playlist);
+						Marshal.ReleaseComObject(playlist);
+						playlistKeys[key] = item.Value[0];
+					}
+					else
+					{
+						// item.Value[0] is the URL to a MusicBee file to be sync'ed
+						// item.Value[1] is the extension of the file
+
+						// if yes, indicate to MusicBee that you want to synch the file - the returned filename is either the same as the supplied filename or if re-encoding/ forced embeding artwork, a temporary filename is returned
+						// if filename is returned as null, that means MusicBee wasnt able to encode the file and it should be skipped from synchronisation
+						var filename = Plugin.MbApiInterface.Sync_FileStart(item.Value[0]);
+						bool success = false;
+						string errorMessage = null;
+
+						try
 						{
-							// Create or verify playlist. Populate after all files have been processed.
-							var name = Regex.Replace(item.Value[0], "^.*\\\\(.*)(\\..*)", "$1");
-							var playlist = iTunes.GetPlaylist(name) ?? iTunes.CreatePlaylist(name);
-							var key = iTunes.GetPersistentId(playlist);
-							Marshal.ReleaseComObject(playlist);
-							playlistKeys[key] = item.Value[0];
+							var mbFile = new MusicBeeFile(item.Value[0]);
+							IITTrack itTrack = null;
+							string itTrackPath = null;
+
+							if (mbFile.WebFile)
+							{
+								itTrackPath = mbFile.Url;
+							}
+							else if (!File.Exists(filename))
+							{
+								throw new IOException(Text.L("Track source file not found: {0}", filename));
+							}
+							else if (mbFile.Url == filename)
+							{
+								itTrackPath = filename;
+							}
+							else
+							{
+								// Track was converted to a format that iTunes accepts...
+								// Create a unique name for the converted file and store it in the MB file record
+								var trackGUID = mbFile.ReencodingFileName;
+
+								if (string.IsNullOrEmpty(trackGUID))
+								{
+									trackGUID = Guid.NewGuid().ToString();
+									mbFile.ReencodingFileName = trackGUID;
+									mbFile.CommitChanges();
+								}
+
+								itTrackPath = Path.Combine(ReencodedFilesStorage, trackGUID + item.Value[1]);
+								File.Copy(filename, itTrackPath, true);
+							}
+
+							var itKey = mbFile.ITunesKey;
+
+							// Track was synced before
+							if (itKey != 0)
+							{
+								itTrack = iTunes.GetTrackByPersistentId(itKey);
+
+								if (itTrack == null)
+								{
+									Trace.WriteLine("A file in MusicBee appears to have been sync'ed to iTunes before but is not found in iTunes: " + mbFile.Url);
+									itKey = 0;
+								}
+								else if (!mbFile.WebFile)
+								{
+									//Local or local network file
+									((IITFileOrCDTrack)itTrack).UpdateInfoFromFile();
+								}
+							}
+
+							// Track was never synced before or was deleted from iTunes library
+							if (itTrack == null)
+							{
+								if (mbFile.WebFile)
+								{
+									itTrack = iTunes.LibraryPlaylist.AddURL(itTrackPath);
+								}
+								else{
+									var operation = iTunes.LibraryPlaylist.AddFile(itTrackPath).Await();
+									var tracks = operation.Tracks;
+									itTrack = tracks[1];
+									Marshal.ReleaseComObject(tracks);
+									Marshal.ReleaseComObject(operation);
+									itKey = iTunes.GetPersistentId(itTrack);
+									mbFile.ITunesKey = itKey;
+									mbFile.CommitChanges();
+								}
+							}
+
+							// Sync ratings & play counts to iTunes
+							itTrack.RepeatTrackOperationUntilNoConflicts(t => t.PlayedDate = mbFile.LastPlayed.MusicBeeToITunes());
+							itTrack.RepeatTrackOperationUntilNoConflicts(t => t.PlayedCount = mbFile.PlayCount);
+							itTrack.RepeatTrackOperationUntilNoConflicts(t => t.SetMusicBeeRating(mbFile.Rating));
+							if (itTrack.Kind == ITTrackKind.ITTrackKindFile)
+							{
+								itTrack.RepeatTrackOperationUntilNoConflicts(t => ((IITFileOrCDTrack)t).SkippedCount = mbFile.SkipCount);
+								itTrack.RepeatTrackOperationUntilNoConflicts(t => ((IITFileOrCDTrack)t).SetMusicBeeAlbumRating(mbFile.RatingAlbum));
+							}
+							if (!mbFile.WebFile)
+							{
+								var sourceFileInfo = new FileInfo(mbFile.Url);
+								var destinationFileInfo = new FileInfo(itTrackPath);
+								destinationFileInfo.LastWriteTimeUtc = sourceFileInfo.LastWriteTimeUtc;
+							}
+
+							Marshal.ReleaseComObject(itTrack);
+
+							trackKeys[itKey] = mbFile;
+
 							success = true;
 							errorMessage = null;
 						}
-						else //Media file
+						catch (Exception ex)
 						{
-							var filename = Plugin.MbApiInterface.Sync_FileStart(item.Value[0]);
-
-							try
-							{
-								var mbFile = new MusicBeeFile(item.Value[0]);
-								IITTrack libraryTrack = null;
-								string iTunesTrackFilename = null;
-
-								if (mbFile.WebFile)
-								{
-									iTunesTrackFilename = mbFile.Url;
-								}
-								else if (!File.Exists(filename))
-								{
-									throw new IOException(Text.L("Track source file not found: {0}", filename));
-								}
-								else if (mbFile.Url == filename)
-								{
-									iTunesTrackFilename = filename;
-								}
-								else
-								{
-									// Track was converted to a format that iTunes accepts...
-									// Create a unique name for the converted file and store it in the MB file record
-									var trackGUID = mbFile.ReencodingFileName;
-
-									if (string.IsNullOrEmpty(trackGUID))
-									{
-										trackGUID = Guid.NewGuid().ToString();
-										mbFile.ReencodingFileName = trackGUID;
-										mbFile.CommitChanges();
-									}
-
-									iTunesTrackFilename = Path.Combine(ReencodedFilesStorage, trackGUID + item.Value[1]);
-									File.Copy(filename, iTunesTrackFilename, true);
-								}
-
-								var syncKey = mbFile.ITunesKey;
-
-								if (syncKey != 0) //Track was synced before
-								{
-									libraryTrack = iTunes.GetTrackByPersistentId(syncKey);
-
-									if (libraryTrack == null)
-									{
-										Trace.WriteLine("A file in MusicBee appears to have been sync'ed to iTunes before but is not found in iTunes: " + mbFile.Url);
-										syncKey = 0;
-									}
-									else if (!mbFile.WebFile)
-									{
-										//Local or local network file
-										((IITFileOrCDTrack)libraryTrack).UpdateInfoFromFile();
-									}
-								}
-
-								if (libraryTrack == null) //Track was never synced before or was deleted from iTunes library. Lets add track to iTunes library. 
-								{
-									if (!mbFile.WebFile) //Local or local network file
-									{
-										var operation = //currentPlaylist
-										iTunes.LibraryPlaylist.AddFile(iTunesTrackFilename).Await();
-										Debug.Assert(!operation.InProgress);
-										var tracks = operation.Tracks;
-										Debug.Assert(tracks != null);
-										Debug.Assert(tracks.Count == 1);
-										libraryTrack = tracks[1];
-										Marshal.ReleaseComObject(tracks);
-										Marshal.ReleaseComObject(operation);
-										syncKey = iTunes.GetPersistentId(libraryTrack);
-										mbFile.ITunesKey = syncKey;
-										mbFile.CommitChanges();
-									}
-									else //Web file
-									{
-										libraryTrack = iTunes.LibraryPlaylist.AddURL(iTunesTrackFilename);
-									}
-								}
-
-								// Sync ratings & play counts...
-								libraryTrack.RepeatTrackOperationUntilNoConflicts(t => t.PlayedDate = mbFile.LastPlayed.MusicBeeToITunes());
-								libraryTrack.RepeatTrackOperationUntilNoConflicts(t => t.PlayedCount = mbFile.PlayCount);
-								libraryTrack.RepeatTrackOperationUntilNoConflicts(t => t.SetMusicBeeRating(mbFile.Rating));
-								if (libraryTrack.Kind == ITTrackKind.ITTrackKindFile)
-								{
-									libraryTrack.RepeatTrackOperationUntilNoConflicts(t => ((IITFileOrCDTrack)t).SkippedCount = mbFile.SkipCount);
-									libraryTrack.RepeatTrackOperationUntilNoConflicts(t => ((IITFileOrCDTrack)t).SetMusicBeeAlbumRating(mbFile.RatingAlbum));
-								}
-
-								if (!mbFile.WebFile) //Local or local network file. Lets set last modified time of iTunes track to the same as MB track.
-								{
-									var sourceFileInfo = new FileInfo(mbFile.Url);
-									var destinationFileInfo = new FileInfo(iTunesTrackFilename);
-									destinationFileInfo.LastWriteTimeUtc = sourceFileInfo.LastWriteTimeUtc;
-								}
-
-								Marshal.ReleaseComObject(libraryTrack);
-
-								trackKeys[syncKey] = mbFile;
-
-								success = true;
-								errorMessage = null;
-							}
-							finally
-							{
-								// when the file synch is done
-								if (filename != null)
-									Plugin.MbApiInterface.Sync_FileEnd(item.Value[0], success, errorMessage);
-							}
+							Trace.WriteLine(ex);
+							lastEx = ex;
+							if (errorMessage == null)
+								errorMessage = ex.Message;
 						}
-					}
-					catch (ArgumentException ex)
-					{
-						Trace.WriteLine(ex);
-						success = true;
-						errorMessage = null;
-						someTracksWereSkipped = true;
-					}
-					catch (Exception ex)
-					{
-						Trace.WriteLine(ex);
-						if (errorMessage == null)
-							errorMessage = ex.Message;
+						finally
+						{
+							if (filename != null)
+								Plugin.MbApiInterface.Sync_FileEnd(item.Value[0], success, errorMessage);
+						}
 					}
 				}
 
@@ -407,7 +412,7 @@ namespace MusicBeePlugin
 						Marshal.ReleaseComObject(track);
 					}
 
-					// Remove non-sync'ed playlists and populate the remaing ones
+					// Remove non-sync'ed playlists and populate the remaining ones
 					foreach (var playlist in iTunes.GetPlaylists())
 					{
 						var key = iTunes.GetPersistentId(playlist);
@@ -457,12 +462,6 @@ namespace MusicBeePlugin
 						// TODO: Wait for sync to finish?
 					}
 				}
-				catch (Exception ex)
-				{
-					Trace.WriteLine(ex);
-					lastEx = ex;
-					return false;
-				}
 				finally
 				{
 					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
@@ -470,11 +469,10 @@ namespace MusicBeePlugin
 					SynchronizationInProgress = false;
 				}
 
-				if (someTracksWereSkipped)
-					MessageBox.Show(Text.L("Some duplicated tracks were skipped."));
+				//if (someTracksWereSkipped)
+				//	MessageBox.Show(Text.L("Some duplicated tracks were skipped."));
 
 				return lastEx == null;
-
 			}
 			catch (Exception ex)
 			{

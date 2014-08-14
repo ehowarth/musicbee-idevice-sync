@@ -73,23 +73,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Backgrounding.cs" />
-    <Compile Include="DeleteTrack.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="DeleteTrack.Designer.cs">
-      <DependentUpon>DeleteTrack.cs</DependentUpon>
-    </Compile>
     <Compile Include="Info.cs" />
     <Compile Include="iTunesExtensions.cs" />
     <Compile Include="MusicBeeFile.cs" />
     <Compile Include="MusicBeeInterface.cs" />
     <Compile Include="MusicBeeStorageInterface.cs" />
-    <Compile Include="NewIPod.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="NewIPod.Designer.cs">
-      <DependentUpon>NewIPod.cs</DependentUpon>
-    </Compile>
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
@@ -120,19 +108,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="DeleteTrack.resx">
-      <DependentUpon>DeleteTrack.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="DeleteTrack.ru.resx">
-      <DependentUpon>DeleteTrack.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Images.resx" />
-    <EmbeddedResource Include="NewIPod.resx">
-      <DependentUpon>NewIPod.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="NewIPod.ru.resx">
-      <DependentUpon>NewIPod.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
