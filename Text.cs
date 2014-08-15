@@ -58,8 +58,10 @@ namespace MusicBeeDeviceSyncPlugin
 				ru: "Плагин позволяет использовать iPod/iPhone посредством iTunes")},
 			{ "Open iPod & iPhone Sync", l10n(
 				ru: "Включить драйвер iPod && iPhone")},
-			{ "Turns sync plugin on and off", l10n(
+			{ "Opens iTunes to begin sync", l10n(
 				ru: "Драйвер iPod & iPhone: Включить/выключить")},
+			{ "Starting iTunes...", l10n(
+				)},
 			{ "Failed to add track to iTunes library: \"{0}\"", l10n(
 				ru:"Не удалось добавить композицию в медиатеку iTunes: \"{0}\"")},
 			{ "No appropriate category found in iTunes library",l10n(
@@ -78,7 +80,9 @@ namespace MusicBeeDeviceSyncPlugin
 				ru: "В плейлист добавляется композиция {0}/{1}")},
 			{ "Syncing iTunes with iPod/iPhone...", l10n(
 				ru: "Синхронизация iTunes с iPod/iPhone...")},
-			{ "Syncing play counts and/or ratings from iTunes: \"{0}\"", l10n(
+			{ "Syncing play counts and ratings from iTunes...", l10n(
+				ru: "Синхронизация счетчиков воспроизведения и рейтингов из iPod/iPhone")},
+			{ "Syncing play counts and ratings from iTunes: \"{0}\"", l10n(
 				ru: "Синхронизация счетчиков воспроизведения и рейтингов из iPod/iPhone: \"{0}\"")},
 			{ "Filling synced playlists...", l10n(
 				ru: "Заполнение синхронизированных плейлистов...")},

@@ -41,6 +41,25 @@ namespace MusicBeePlugin
 
 		public static MusicBeeApiInterface MbApiInterface;
 
+		private DeviceProperties Device = new DeviceProperties
+		{
+			ShowCategoryNodes = true,
+			AudiobooksSupported = false,
+			PodcastsSupported = false,
+			VideoSupported = false,
+			SyncExternalArtwork = false,
+			SyncAllowFileRemoval = false, // This plugin always removes non-sync-ed files from iTunes. It doesn't ask for permission.
+			SyncAllowRating2Way = false, // This plugin always syncs plays from iTunes. It doesn't ask for permission.
+			SyncAllowPlayCount2Way = false, // This plugin always syncs plays from iTunes. It doesn't ask for permission.
+			SyncAllowPlaylists2Way = false,
+			SupportedFormats =
+				SynchronisationSupportedFormats.SyncMp3Supported |
+				SynchronisationSupportedFormats.SyncAacSupported |
+				SynchronisationSupportedFormats.SyncAlacSupported |
+				SynchronisationSupportedFormats.SyncWavSupported,
+			DeviceIcon64 = (Bitmap)MusicBeeDeviceSyncPlugin.Properties.Resources.ResourceManager.GetObject("iTunes64"),
+		};
+
 		private bool uninstalled = false;
 
 		private Form MbForm;
@@ -81,7 +100,7 @@ namespace MusicBeePlugin
 
 			OpenMenu = MbApiInterface.MB_AddMenuItem(
 				"mnuTools/" + Text.L("Open iPod && iPhone Sync"),
-				Text.L("Turns sync plugin on and off"),
+				Text.L("Opens iTunes to begin sync"),
 				ToggleItunesOpenedAndClosed);
 
 			return Info;
@@ -186,44 +205,8 @@ namespace MusicBeePlugin
 		/// <returns></returns>
 		public bool GetDeviceProperties(IntPtr handle)
 		{
-			var properties = new DeviceProperties
-			{
-				ShowCategoryNodes = true,
-				AudiobooksSupported = false,
-				PodcastsSupported = false,
-				VideoSupported = false,
-				SyncExternalArtwork = false,
-				SyncAllowFileRemoval = false, // This plugin always removes non-sync-ed files from iTunes. It doesn't ask for permission.
-				SyncAllowRating2Way = false, // This plugin always syncs plays from iTunes. It doesn't ask for permission.
-				SyncAllowPlayCount2Way = false, // This plugin always syncs plays from iTunes. It doesn't ask for permission.
-				SyncAllowPlaylists2Way = false,
-				SupportedFormats =
-					SynchronisationSupportedFormats.SyncMp3Supported |
-					SynchronisationSupportedFormats.SyncAacSupported |
-					SynchronisationSupportedFormats.SyncAlacSupported |
-					SynchronisationSupportedFormats.SyncWavSupported,
-				DeviceIcon64 = (Bitmap)MusicBeeDeviceSyncPlugin.Properties.Resources.ResourceManager.GetObject("iTunes64"),
-			};
-
-			if (IPodSource == null)
-			{
-				properties.DeviceName = Text.L("iPod & iPhone Sync");
-				properties.FirmwareVersion = Text.L("No device");
-				properties.Model = Text.L("No device");
-				properties.Manufacturer = Text.L("No device");
-			}
-			else
-			{
-				properties.DeviceName = IPodSource.Name;
-				properties.FirmwareVersion = IPodSource.SoftwareVersion;
-				properties.FreeSpace = (ulong)IPodSource.FreeSpace;
-				properties.TotalSpace = (ulong)IPodSource.Capacity;
-				properties.Model = Text.L("<undisclosed>");
-				properties.Manufacturer = "Apple Inc.";
-			}
-
-			Marshal.StructureToPtr(properties, handle, false);
-
+			Marshal.StructureToPtr(Device, handle, false);
+			Trace.WriteLine("Reporting device \"" + Device.DeviceName + "\" to MusicBee");
 			return true;
 		}
 
@@ -547,7 +530,17 @@ namespace MusicBeePlugin
 							if (iTunes.Sources[i].Kind == ITSourceKind.ITSourceKindIPod)
 							{
 								IPodSource = (IITIPodSource)iTunes.Sources[i];
-								Thread.Sleep(2000);
+								while (IPodSource == null || IPodSource.Name == null)
+								{
+									Trace.WriteLine("Waiting for IITIPodSource to be fleshed out in this thread...");
+									Thread.Sleep(2000);
+								}
+								Device.DeviceName = IPodSource.Name;
+								Device.FirmwareVersion = IPodSource.SoftwareVersion;
+								Device.FreeSpace = (ulong)IPodSource.FreeSpace;
+								Device.TotalSpace = (ulong)IPodSource.Capacity;
+								Device.Model = "--";
+								Device.Manufacturer = "Apple Inc.";
 								break;
 							}
 
@@ -562,12 +555,16 @@ namespace MusicBeePlugin
 
 				if (IPodSource == null && waitingWindow.proceed == false)
 				{
+					Device.DeviceName = Text.L("iPod & iPhone Sync");
+					Device.FirmwareVersion = Text.L("No device");
+					Device.Model = Text.L("No device");
+					Device.Manufacturer = Text.L("No device");
 					ReadyForSync = false;
 					CloseITunes();
 				}
 				else
 				{
-					Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageReady);
+					MbForm.BeginInvoke(Plugin.MbApiInterface.MB_SendNotification, Plugin.CallbackType.StorageReady);
 
 					// Sync play history and ratings from iTunes right now.
 					// Cannot wait for the Synchronize command from MB before collecting ratings and history
@@ -583,7 +580,7 @@ namespace MusicBeePlugin
 
 					foreach (var track in iTunes.GetAllTracks())
 					{
-						Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and ratings from iTunes: {0}", track.Name));
+						Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and ratings from iTunes: \"{0}\"", track.Name));
 
 						var file = new MusicBeeFile(track.Location);
 						if (!file.Exists) continue;
@@ -599,6 +596,7 @@ namespace MusicBeePlugin
 							file.Rating = track.MusicBeeRating();
 							file.RatingAlbum = track.MusicBeeAlbumRating();
 							file.CommitChanges();
+							Plugin.MbApiInterface.MB_RefreshPanels();
 						}
 
 						Marshal.ReleaseComObject(track);
