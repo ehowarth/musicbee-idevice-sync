@@ -527,13 +527,14 @@ namespace MusicBeePlugin
 					{
 						for (int i = 1; i <= iTunes.Sources.Count; i++)
 						{
-							if (iTunes.Sources[i].Kind == ITSourceKind.ITSourceKindIPod)
+							var source = iTunes.Sources[i];
+							if (source.Kind == ITSourceKind.ITSourceKindIPod)
 							{
-								IPodSource = (IITIPodSource)iTunes.Sources[i];
+								IPodSource = (IITIPodSource)source;
 								while (IPodSource == null || IPodSource.Name == null)
 								{
-									Trace.WriteLine("Waiting for IITIPodSource to be fleshed out in this thread...");
-									Thread.Sleep(2000);
+									Trace.WriteLine("Waiting for IITIPodSource to be fully loaded by iTunes...");
+									Thread.Sleep(1000);
 								}
 								Device.DeviceName = IPodSource.Name;
 								Device.FirmwareVersion = IPodSource.SoftwareVersion;
@@ -543,9 +544,9 @@ namespace MusicBeePlugin
 								Device.Manufacturer = "Apple Inc.";
 								break;
 							}
-
-							Marshal.ReleaseComObject(iTunes.Sources[i]);
+							Marshal.ReleaseComObject(source);
 						}
+						Thread.Sleep(1000);
 					}
 				}
 				finally
@@ -564,7 +565,7 @@ namespace MusicBeePlugin
 				}
 				else
 				{
-					MbForm.BeginInvoke(Plugin.MbApiInterface.MB_SendNotification, Plugin.CallbackType.StorageReady);
+					Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageReady);
 
 					// Sync play history and ratings from iTunes right now.
 					// Cannot wait for the Synchronize command from MB before collecting ratings and history
@@ -576,6 +577,7 @@ namespace MusicBeePlugin
 					{
 						iTunes.UpdateIPod();
 						Thread.Sleep(20000);
+						// TODO: Wait until sync is done
 					}
 
 					foreach (var track in iTunes.GetAllTracks())

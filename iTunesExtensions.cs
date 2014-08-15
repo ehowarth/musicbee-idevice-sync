@@ -169,7 +169,7 @@ namespace MusicBeeDeviceSyncPlugin
 		public static DateTime MusicBeeToITunes(this DateTime? date)
 		{
 			if (date == null) return MinPlayedDate;
-			return date.Value.AddSeconds(59);//.ToLocalTime();
+			return date.Value.AddSeconds(59).ToLocalTime();
 		}
 
 		public static int MusicBeeDuration(this IITTrack track)
