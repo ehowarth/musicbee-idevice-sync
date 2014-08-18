@@ -1,6 +1,7 @@
 ﻿using MusicBeePlugin;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace MusicBeeDeviceSyncPlugin
@@ -102,16 +103,45 @@ namespace MusicBeeDeviceSyncPlugin
 			CommitChanges();
 		}
 
+		/// <summary>
+		/// Sets the last modified date of the given file to the same as this file
+		/// </summary>
+		/// <param name="otherPath"></param>
+		public void SyncFileTimestamp(string otherPath)
+		{
+			if (!WebFile)
+			{
+				var sourceFileInfo = new FileInfo(Url);
+				var destinationFileInfo = new FileInfo(otherPath);
+				destinationFileInfo.LastWriteTimeUtc = sourceFileInfo.LastWriteTimeUtc;
+			}
+		}
+
 		public static IEnumerable<MusicBeeFile> AllFiles()
 		{
 			if (Plugin.MbApiInterface.Library_QueryFiles("domain=Library"))
 			{
-				return Plugin.MbApiInterface
-					.Library_QueryGetAllFiles()
-					.Split(Plugin.FilesSeparators, StringSplitOptions.RemoveEmptyEntries)
-					.Select(url => new MusicBeeFile(url));
+				return new MusicBeeFile[0];
 			}
-			return new MusicBeeFile[0];
+			return AsMusicBeeFiles(Plugin.MbApiInterface.Library_QueryGetAllFiles());
+		}
+
+		public static IEnumerable<MusicBeeFile> GetPlaylistFiles(string playlistUrl)
+		{
+			if (!Plugin.MbApiInterface.Playlist_QueryFiles(playlistUrl))
+			{
+				return new MusicBeeFile[0];
+			}
+			return AsMusicBeeFiles( Plugin.MbApiInterface.Playlist_QueryGetAllFiles() );
+		}
+
+		private static readonly char[] FilesSeparators = { '\0' };
+
+		private static IEnumerable<MusicBeeFile> AsMusicBeeFiles(string urlList)
+		{
+			return urlList
+				.Split(FilesSeparators, StringSplitOptions.RemoveEmptyEntries)
+				.Select(url => new MusicBeeFile(url));
 		}
 	}
 }

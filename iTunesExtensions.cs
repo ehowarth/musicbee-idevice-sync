@@ -1,5 +1,4 @@
 ﻿using iTunesLib;
-using MusicBeePlugin;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -128,73 +127,21 @@ namespace MusicBeeDeviceSyncPlugin
 			return unchecked((int)(encoded & 0xFFFFFFFF));
 		}
 
-		public static KeyValuePair<byte, string>[] ToMusicBeeFileProperties(this IITFileOrCDTrack track)
+		public static void DeleteAllTracks(this IITUserPlaylist playlist)
 		{
-			return new KeyValuePair<byte, string>[]
+			while (playlist.Tracks.Count > 0)
 			{
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Url, track.Location),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Artist, track.Artist),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.TrackTitle, track.Name),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Album, track.Album),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Genre, track.Genre),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Comment, track.Comment),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.AlbumArtistRaw, track.AlbumArtist),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.RatingAlbum, track.MusicBeeAlbumRating().ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Rating, track.MusicBeeRating().ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Year, track.Year.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Bitrate, track.BitRate.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Size, track.Size.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.Duration, track.MusicBeeDuration().ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.PlayCount, track.PlayedCount.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.SkipCount, track.SkippedCount.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Composer, track.Composer),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.DiscCount, track.DiscCount.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.DiscNo, track.DiscNumber.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Grouping, track.Grouping),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.TrackCount, track.TrackCount.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.TrackNo, track.TrackNumber.ToString()),
-				new KeyValuePair<byte, string>((byte)Plugin.MetaDataType.Artwork, track.Artwork.Count == 0 ? "" : "Y"),
-				new KeyValuePair<byte, string>((byte)Plugin.FilePropertyType.LastPlayed, "" + track.MusicBeeLastPlayed()),
-			};
+				var track = playlist.Tracks[1];
+				track.Delete();
+				Marshal.ReleaseComObject(track);
+			}
 		}
 
-		public static DateTime? MusicBeeLastPlayed(this IITTrack track)
+		public static void AddTrackToPlaylistByPersistentId(this iTunesApp iTunes, IITUserPlaylist playlist, long id)
 		{
-			if (track.PlayedDate <= MinPlayedDate) return null;
-			return track.PlayedDate.AddSeconds(-track.PlayedDate.Second).ToUniversalTime();
-		}
-
-		private static readonly DateTime MinPlayedDate = new DateTime(1899, 12, 30);
-
-		public static DateTime MusicBeeToITunes(this DateTime? date)
-		{
-			if (date == null) return MinPlayedDate;
-			return date.Value.AddSeconds(59).ToLocalTime();
-		}
-
-		public static int MusicBeeDuration(this IITTrack track)
-		{
-			return track.Duration * 1000;
-		}
-
-		public static int MusicBeeRating(this IITTrack track)
-		{
-			return track.Rating / 20;
-		}
-
-		public static void SetMusicBeeRating(this IITTrack track, int value)
-		{
-			track.Rating = value * 20;
-		}
-
-		public static int MusicBeeAlbumRating(this IITFileOrCDTrack track)
-		{
-			return track.AlbumRating / 20;
-		}
-
-		public static void SetMusicBeeAlbumRating(this IITFileOrCDTrack track, int value)
-		{
-			track.AlbumRating = value * 20;
+			var track = iTunes.GetTrackByPersistentId(id);
+			playlist.AddTrack(track);
+			Marshal.ReleaseComObject(track);
 		}
 
 		public static void RepeatTrackOperationUntilNoConflicts(this IITTrack track, Action<IITTrack> action)
