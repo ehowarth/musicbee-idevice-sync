@@ -485,27 +485,7 @@ namespace MusicBeePlugin
 					// Cannot wait for the Synchronize command from MB before collecting ratings and history
 					// because this data may affect the file list passed to Synchronize.
 					//		if (flags.HasFlag(Plugin.SynchronisationSettings.SyncPlayCount2Way) || flags.HasFlag(Plugin.SynchronisationSettings.SyncRating2Way))
-
-					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and ratings from iTunes..."));
-
-					if (IPodSource != null)
-					{
-						iTunes.UpdateIPod();
-						Thread.Sleep(20000);
-						// TODO: Wait until sync is done
-					}
-
-					foreach (var track in iTunes.GetAllTracks())
-					{
-						Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and ratings from iTunes: \"{0}\"", track.Name));
-
-						var file = new MusicBeeFile(track.Location);
-						if (!file.Exists) continue;
-
-						track.SyncITunesHistoryToMusicBee(file);
-
-						Marshal.ReleaseComObject(track);
-					}
+					SyncITunesHistoryToMusicBee();
 
 					ReadyForSync = true;
 				}
@@ -523,6 +503,37 @@ namespace MusicBeePlugin
 
 				ReadyForSync = false;
 				CloseITunes();
+			}
+			finally
+			{
+				Plugin.MbApiInterface.MB_SetBackgroundTaskMessage("");
+			}
+		}
+
+		private void SyncITunesHistoryToMusicBee()
+		{
+			try
+			{
+				Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and ratings from iTunes..."));
+
+				if (IPodSource != null)
+				{
+					iTunes.UpdateIPod();
+					Thread.Sleep(20000);
+					// TODO: Wait until sync is done
+				}
+
+				foreach (var track in iTunes.GetAllTracks())
+				{
+					Plugin.MbApiInterface.MB_SetBackgroundTaskMessage(Text.L("Syncing play counts and ratings from iTunes: \"{0}\"", track.Name));
+
+					var file = new MusicBeeFile(track.Location);
+					if (!file.Exists) continue;
+
+					track.SyncITunesHistoryToMusicBee(file);
+
+					Marshal.ReleaseComObject(track);
+				}
 			}
 			finally
 			{
@@ -591,6 +602,8 @@ namespace MusicBeePlugin
 				Device.FirmwareVersion = iTunes.Version;
 				Device.Model = Text.L("No device");
 				Device.Manufacturer = "Apple Inc.";
+				Device.FreeSpace = 0;
+				Device.TotalSpace = 0;
 			}
 
 			// Tell MusicBee to add an item to the Devices panel for this.
@@ -606,6 +619,12 @@ namespace MusicBeePlugin
 
 			ReadyForSync = false;
 
+			if (Device.DeviceName != null)
+			{
+				Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageEject);
+				Device.DeviceName = null;
+			}
+
 			if (IPodSource != null)
 			{
 				IPodSource.EjectIPod();
@@ -618,8 +637,6 @@ namespace MusicBeePlugin
 				iTunes.Quit();
 				Marshal.ReleaseComObject(iTunes);
 				iTunes = null;
-
-				Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageEject);
 			}
 
 			OpenMenu.Enabled = true;
