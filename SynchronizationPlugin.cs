@@ -478,6 +478,7 @@ namespace MusicBeePlugin
 #if !DEBUG
 				iTunes.BrowserWindow.Minimized = true;
 #endif
+				iTunes.ForceToForegroundOnDialog = true;
 
 				if (LoadITunesStroage())
 				{
@@ -593,7 +594,7 @@ namespace MusicBeePlugin
 
 			if (IPodSource == null)
 			{
-				if (waitingWindow.DialogResult == DialogResult.Cancel )
+				if (waitingWindow.DialogResult == DialogResult.Cancel)
 				{
 					return false;
 				}
@@ -621,20 +622,35 @@ namespace MusicBeePlugin
 
 			if (Device.DeviceName != null)
 			{
-				Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageEject);
 				Device.DeviceName = null;
+				// Tell MusicBee to call Eject()
+				Plugin.MbApiInterface.MB_SendNotification(Plugin.CallbackType.StorageEject);
 			}
 
 			if (IPodSource != null)
 			{
-				IPodSource.EjectIPod();
+				try
+				{
+					IPodSource.EjectIPod();
+				}
+				catch (Exception x)
+				{
+					Trace.WriteLine(x);
+				}
 				Marshal.ReleaseComObject(IPodSource);
 				IPodSource = null;
 			}
 
 			if (iTunes != null)
 			{
-				iTunes.Quit();
+				try
+				{
+					iTunes.Quit();
+				}
+				catch (Exception x)
+				{
+					Trace.WriteLine(x);
+				}
 				Marshal.ReleaseComObject(iTunes);
 				iTunes = null;
 			}
