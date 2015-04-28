@@ -1,0 +1,1 @@
+This is a variation of boroda74's iPod & iPhone Driver. It is a MusicBee plugin that uses the iTunes API to sync files to iOS devices.
