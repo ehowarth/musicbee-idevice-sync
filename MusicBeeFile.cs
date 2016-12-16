@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace MusicBeeDeviceSyncPlugin
+namespace MusicBeeITunesSyncPlugin
 {
 	sealed class MusicBeeFile
 	{
@@ -109,7 +109,7 @@ namespace MusicBeeDeviceSyncPlugin
 		/// <param name="otherPath"></param>
 		public void SyncFileTimestamp(string otherPath)
 		{
-			if (!WebFile)
+			if (!WebFile && Url != otherPath)
 			{
 				var sourceFileInfo = new FileInfo(Url);
 				var destinationFileInfo = new FileInfo(otherPath);

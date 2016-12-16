@@ -3,7 +3,7 @@ using MusicBeePlugin;
 using System;
 using System.Collections.Generic;
 
-namespace MusicBeeDeviceSyncPlugin
+namespace MusicBeeITunesSyncPlugin
 {
 	static class FilePropertyAndTagConversions
 	{
@@ -42,7 +42,7 @@ namespace MusicBeeDeviceSyncPlugin
 			var mbLastPlayed = file.LastPlayed;
 			var itLastPlayed = track.PlayedDate.AddSeconds(-track.PlayedDate.Second);
 
-			if (mbLastPlayed < itLastPlayed)
+			if (mbLastPlayed == null || mbLastPlayed < itLastPlayed)
 			{
 				file.PlayCount = track.PlayedCount;
 				file.LastPlayed = track.PlayedDate.ToUniversalTime();

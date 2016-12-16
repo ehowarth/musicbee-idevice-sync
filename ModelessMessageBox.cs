@@ -2,7 +2,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace MusicBeeDeviceSyncPlugin
+namespace MusicBeeITunesSyncPlugin
 {
 	public sealed class ModelessMessageBox : Form
 	{

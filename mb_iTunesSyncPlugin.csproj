@@ -8,8 +8,8 @@
     <ProjectGuid>{F5D46BA1-6F21-40EF-9695-46105CCACD08}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>MusicBeeDeviceSyncPlugin</RootNamespace>
-    <AssemblyName>mb_iDeviceSyncPlugin</AssemblyName>
+    <RootNamespace>MusicBeeITunesSyncPlugin</RootNamespace>
+    <AssemblyName>mb_iTunesSyncPlugin</AssemblyName>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <FileUpgradeFlags>

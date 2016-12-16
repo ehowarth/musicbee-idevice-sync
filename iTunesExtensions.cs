@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace MusicBeeDeviceSyncPlugin
+namespace MusicBeeITunesSyncPlugin
 {
 	static class iTunesExtensions
 	{
@@ -140,8 +140,11 @@ namespace MusicBeeDeviceSyncPlugin
 		public static void AddTrackToPlaylistByPersistentId(this iTunesApp iTunes, IITUserPlaylist playlist, long id)
 		{
 			var track = iTunes.GetTrackByPersistentId(id);
-			playlist.AddTrack(track);
-			Marshal.ReleaseComObject(track);
+            if (track != null)
+            {
+                playlist.AddTrack(track);
+                Marshal.ReleaseComObject(track);
+            }
 		}
 
 		public static void RepeatTrackOperationUntilNoConflicts(this IITTrack track, Action<IITTrack> action)

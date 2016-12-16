@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Threading;
 
-namespace MusicBeeDeviceSyncPlugin
+namespace MusicBeeITunesSyncPlugin
 {
 	static class Backgrounding
 	{
